@@ -1,10 +1,10 @@
 [project]
-name = "vc-cheat-tool"
+name = "vc-cheat-typer"
 version = "1.5.0"
-description = "GTA: Vice City 秘籍一键输入器（Windows / 标准库零依赖）"
+description = "VC-Cheat-Typer — GTA: Vice City 秘籍一键输入器（Windows / 标准库零依赖）"
 requires-python = ">=3.8"
 
-# 运行时零依赖：以下均为开发期工具，不影响 vc_cheat_tool.py 的运行
+# 运行时零依赖：以下均为开发期工具，不影响 vc_cheat_typer.py 的运行
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
 

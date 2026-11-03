@@ -1,4 +1,6 @@
-# 罪恶都市 · 秘籍一键输入器（GTA: Vice City Cheat Typer）
+# VC-Cheat-Typer
+
+> GTA: Vice City（罪恶都市）秘籍一键输入器 — Windows / 单文件 / 零第三方依赖
 
 一个**单文件、零第三方依赖**的 Windows 桌面小工具：按一下快捷键，它替你在游戏里"打字"输入秘籍。
 
@@ -46,10 +48,10 @@
 :: 方式一：双击 run.bat（后台运行，无控制台窗口）
 
 :: 方式二：命令行
-"%LOCALAPPDATA%\Programs\Python\Python310\pythonw.exe" vc_cheat_tool.py
+"%LOCALAPPDATA%\Programs\Python\Python310\pythonw.exe" vc_cheat_typer.py
 
 :: 方式三：先跑一次自检（推荐首次使用时执行）
-"%LOCALAPPDATA%\Programs\Python\Python310\python.exe" vc_cheat_tool.py --selftest
+"%LOCALAPPDATA%\Programs\Python\Python310\python.exe" vc_cheat_typer.py --selftest
 ```
 
 自检会验证：结构体尺寸、组合键解析、真实键盘注入落字、热键注册与冲突返回码、GUI 启动。
@@ -165,7 +167,7 @@
 
 ```
 vc-cheats/
-├── vc_cheat_tool.py   主程序（单文件）
+├── vc_cheat_typer.py  主程序（单文件）
 ├── run.bat            启动器（找 pythonw 后台运行）
 ├── cheats.json        你的方案组 + 设置 + 统计（自动生成，可直接备份/分享）
 ├── pyproject.toml     开发期工具配置（ruff；运行时不需要）

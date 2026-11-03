@@ -15,7 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vc_cheat_tool import (  # noqa: E402
+from vc_cheat_typer import (  # noqa: E402
     DEFAULT_SETTINGS,
     STORE_VERSION,
     VK_BY_NAME,

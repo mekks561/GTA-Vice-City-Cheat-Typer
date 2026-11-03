@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-GTA: Vice City 秘籍一键输入器  (Windows / 单文件 / 零第三方依赖)
+VC-Cheat-Typer — GTA: Vice City 秘籍一键输入器（Windows / 单文件 / 零第三方依赖）
 ================================================================
 
 功能
@@ -47,7 +47,7 @@ import tkinter as tk
 import uuid
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-APP_NAME = "Vice City 秘籍一键输入器"
+APP_NAME = "VC-Cheat-Typer"
 APP_VER = "1.5"
 IS_WIN = os.name == "nt"
 
@@ -501,7 +501,7 @@ def force_foreground(hwnd: int) -> bool:
 # 注入的扫描码会被转成 VK_PACKET（WM_KEYDOWN wParam=229），一个字符都收不到——这是
 # Tk 显示层的问题，不代表注入失效（游戏走 DirectInput 读设备状态，两者是不同通道）。
 # 原生窗口没有这层干扰，能确定性验证"扫描码 → 虚拟键 → WM_CHAR"全链路。
-_RAW_PROBE_CLASS = "VC_CheatTool_RawProbe"
+_RAW_PROBE_CLASS = "VC_CheatTyper_RawProbe"
 
 
 def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool, str]:
@@ -678,7 +678,7 @@ class HotkeyEngine:
 # 数据（v2：多方案组 + 使用统计；自动迁移 v1 单列表格式）
 # ----------------------------------------------------------------------------
 STORE_VERSION = 2
-STORE_APP = "vc-cheat-tool"
+STORE_APP = "vc-cheat-typer"
 
 DEFAULT_SETTINGS = {
     "char_interval_ms": 45,   # 每字总间隔
@@ -1974,7 +1974,7 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as td:
         legacy = os.path.join(td, "v1.json")
         with open(legacy, "w", encoding="utf-8") as fh:
-            json.dump({"app": "vc-cheat-tool", "version": 1,
+            json.dump({"app": "vc-cheat-typer", "version": 1,
                        "settings": {"char_interval_ms": 80},
                        "cheats": [{"id": "x1", "name": "满血", "code": "ASPIRINE",
                                    "hotkey": "F4", "group": "生存", "note": ""}]}, fh, ensure_ascii=False)
@@ -2046,7 +2046,7 @@ def main() -> int:
 
     # 单实例：避免两个进程抢同一批全局热键，注册失败会让人误以为是"冲突"
     # 句柄必须保持存活直到进程退出，故赋值给变量（ruff F841 特批）
-    mutex = kernel32.CreateMutexW(None, False, "Local\\VC_CheatTool_SingleInstance")  # noqa: F841
+    mutex = kernel32.CreateMutexW(None, False, "Local\\VC_Cheat_Typer_SingleInstance")  # noqa: F841
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
         root = tk.Tk()
         root.withdraw()
