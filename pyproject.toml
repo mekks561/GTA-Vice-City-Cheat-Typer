@@ -1,0 +1,19 @@
+[project]
+name = "vc-cheat-tool"
+version = "1.5.0"
+description = "GTA: Vice City 秘籍一键输入器（Windows / 标准库零依赖）"
+requires-python = ">=3.8"
+
+# 运行时零依赖：以下均为开发期工具，不影响 vc_cheat_tool.py 的运行
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py38"
+exclude = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# E501 行超限：中文注释密集，交由 line-length=140 宽限；B008 等按需追加
+ignore = ["E501"]

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.venv/
+
+# 用户本地配置（含个人使用统计，不随仓库分发）
+cheats.json
+cheats.json.tmp
+
+# 构建产物
+build/
+dist/
+*.spec
+
+# 临时文件
+_scratch_*
+_shot*
+*.bmp
