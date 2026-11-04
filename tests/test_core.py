@@ -18,18 +18,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vc_cheat_typer import (  # noqa: E402
     DEFAULT_SETTINGS,
     PAUSE_ID,
+    STORE_APP,
     STORE_VERSION,
     VK_BY_NAME,
     _norm_cheat,
     build_bindings,
     bump_stats,
+    bundle_payload,
+    candidate_combos,
     default_store,
     filter_cheats,
     format_combo,
     is_safe_binding,
     load_store,
+    normalize_store,
+    parse_bundle,
     parse_combo,
+    pick_free_combo,
     save_store,
+    sorted_cheats,
+    touch_today,
 )
 import vc_cheat_typer as _module  # noqa: E402  （需要读模块级 LAST_LOAD_WARNING）
 
@@ -258,6 +266,166 @@ class TestResilience(unittest.TestCase):
             self.assertEqual(_module.LAST_LOAD_WARNING, "")
             restored = load_store(bak)
             self.assertEqual(restored["version"], STORE_VERSION)
+
+
+class TestConflictFix(unittest.TestCase):
+    """1.6 P1-F：冲突处置——按候选序列挑空闲键"""
+
+    def setUp(self):
+        self.cheats = default_store()["profiles"][0]["cheats"]
+
+    def test_candidate_pool_is_safe_unique_and_avoids_f12(self):
+        pool = candidate_combos()
+        self.assertTrue(pool)
+        self.assertEqual(pool[0], "F1")
+        self.assertEqual(len(pool), len(set(pool)))
+        self.assertNotIn("F12", pool)
+        for combo in pool:
+            parsed = parse_combo(combo)
+            self.assertIsNotNone(parsed, combo)
+            self.assertTrue(is_safe_binding(*parsed), combo)
+
+    def test_pick_skips_keys_taken_by_other_cheats(self):
+        cheats = [{"id": "a", "hotkey": "F1"}, {"id": "b", "hotkey": "F2"},
+                  {"id": "c", "hotkey": ""}]
+        self.assertEqual(pick_free_combo(cheats), "F3")
+
+    def test_pick_skips_pause_key_and_known_bad_keys(self):
+        cheats = [{"id": "a", "hotkey": "F1"}]
+        self.assertEqual(pick_free_combo(cheats, "F2"), "F3")
+        self.assertEqual(pick_free_combo(cheats, "F2", avoid=["F3"]), "F4")
+
+    def test_pick_can_return_own_key_when_not_taken(self):
+        cheats = [{"id": "a", "hotkey": "F1"}, {"id": "b", "hotkey": "Shift+F5"}]
+        self.assertEqual(pick_free_combo(cheats, exclude_id="b"), "F2")
+
+    def test_pick_returns_empty_when_pool_exhausted(self):
+        cheats = [{"id": str(i), "hotkey": c} for i, c in enumerate(candidate_combos())]
+        self.assertEqual(pick_free_combo(cheats), "")
+
+    def test_default_cheats_have_free_keys_for_migration(self):
+        # 默认 28 条占用了 F1–F11/Shift+F1…，仍应能再分配出空闲键
+        self.assertTrue(pick_free_combo(self.cheats, "Ctrl+Alt+P"))
+
+
+class TestBundle(unittest.TestCase):
+    """1.6 P1-G：整包备份 / 恢复"""
+
+    def _store(self):
+        store = default_store()
+        store["profiles"].append({"name": "速通", "cheats": [
+            {"id": "z1", "name": "满血", "code": "ASPIRINE", "hotkey": "Ctrl+F1",
+             "group": "生存", "note": "", "interval_ms": 100}]})
+        store["active_profile"] = "速通"
+        store["stats"] = {"ASPIRINE": {"count": 7, "last": "2026-11-04 20:00"}}
+        store["today"] = {"date": "2026-11-04", "count": 3}
+        store["settings"]["char_interval_ms"] = 70
+        return store
+
+    def test_roundtrip_keeps_profiles_settings_stats_and_speed(self):
+        store = self._store()
+        payload = bundle_payload(store)
+        self.assertEqual(payload["kind"], "bundle")
+        self.assertEqual(payload["app"], STORE_APP)
+        back, err = parse_bundle(payload)
+        self.assertEqual(err, "")
+        self.assertIsNotNone(back)
+        self.assertEqual([p["name"] for p in back["profiles"]], ["默认", "速通"])
+        self.assertEqual(back["active_profile"], "速通")
+        self.assertEqual(back["settings"]["char_interval_ms"], 70)
+        self.assertEqual(back["stats"]["ASPIRINE"]["count"], 7)
+        self.assertEqual(back["today"], {"date": "2026-11-04", "count": 3})
+        self.assertEqual(back["profiles"][1]["cheats"][0]["interval_ms"], 100)
+
+    def test_roundtrip_through_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "bundle.json")
+            store = self._store()
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(bundle_payload(store), fh, ensure_ascii=False)
+            with open(path, encoding="utf-8") as fh:
+                back, err = parse_bundle(json.load(fh))
+            self.assertEqual(err, "")
+            total = sum(len(p["cheats"]) for p in back["profiles"])
+            self.assertEqual(total, 28 + 1)
+
+    def test_rejects_foreign_app(self):
+        store, err = parse_bundle({"app": "other-tool", "profiles": [{"name": "x", "cheats": []}]})
+        self.assertIsNone(store)
+        self.assertIn("不是", err)
+
+    def test_rejects_single_profile_file(self):
+        store, err = parse_bundle({"app": STORE_APP, "profile": {"name": "a", "cheats": []}})
+        self.assertIsNone(store)
+        self.assertIn("导入方案", err)
+
+    def test_rejects_empty_or_malformed(self):
+        for raw in (None, [], {}, {"profiles": []}, {"profiles": "x"}):
+            store, err = parse_bundle(raw)
+            self.assertIsNone(store, raw)
+            self.assertTrue(err, raw)
+
+
+class TestSpeedAndToday(unittest.TestCase):
+    """1.6 P1-H 单条速度 / P1-J 今日计数"""
+
+    def test_interval_normalized_and_clamped(self):
+        self.assertEqual(_norm_cheat({"code": "X1"})["interval_ms"], 0)
+        self.assertEqual(_norm_cheat({"code": "X1", "interval_ms": 100})["interval_ms"], 100)
+        self.assertEqual(_norm_cheat({"code": "X1", "interval_ms": "120"})["interval_ms"], 120)
+        self.assertEqual(_norm_cheat({"code": "X1", "interval_ms": 999})["interval_ms"], 0)   # 越界回落
+        self.assertEqual(_norm_cheat({"code": "X1", "interval_ms": "abc"})["interval_ms"], 0)
+
+    def test_touch_today_resets_across_days(self):
+        first = touch_today({"date": "2026-11-04", "count": 2}, "2026-11-04")
+        self.assertEqual(first["count"], 3)
+        nxt = touch_today(first, "2026-11-05")
+        self.assertEqual(nxt, {"date": "2026-11-05", "count": 1})
+        self.assertEqual(touch_today(None, "2026-11-05", bump=False)["count"], 0)
+
+    def test_today_persisted_and_loaded(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "cheats.json")
+            store = default_store()
+            store["today"] = {"date": "2026-11-04", "count": 5}
+            save_store(store, path)
+            self.assertEqual(load_store(path)["today"], {"date": "2026-11-04", "count": 5})
+
+    def test_normalize_store_is_pure(self):
+        raw = {"profiles": [{"name": "默认", "cheats": [{"code": "aspirine"}]}]}
+        store = normalize_store(raw)
+        self.assertEqual(store["profiles"][0]["cheats"][0]["code"], "ASPIRINE")
+        self.assertEqual(raw["profiles"][0]["cheats"][0]["code"], "aspirine")  # 源数据不被改写
+
+
+class TestSorting(unittest.TestCase):
+    """1.6 P1-J：按次数 / 最近 / 名称排序"""
+
+    def setUp(self):
+        self.cheats = [{"id": "a", "code": "AAA", "name": "乙"},
+                       {"id": "b", "code": "BBB", "name": "甲"},
+                       {"id": "c", "code": "CCC", "name": "丙"}]
+        self.stats = {"AAA": {"count": 1, "last": "2026-11-01 10:00"},
+                      "BBB": {"count": 9, "last": "2026-11-04 21:00"}}
+
+    def test_sort_by_count(self):
+        self.assertEqual([c["code"] for c in sorted_cheats(self.cheats, "count", True, self.stats)],
+                         ["BBB", "AAA", "CCC"])
+        self.assertEqual([c["code"] for c in sorted_cheats(self.cheats, "count", False, self.stats)],
+                         ["CCC", "AAA", "BBB"])
+
+    def test_sort_by_last(self):
+        self.assertEqual([c["code"] for c in sorted_cheats(self.cheats, "last", True, self.stats)],
+                         ["BBB", "AAA", "CCC"])
+
+    def test_sort_by_name(self):
+        self.assertEqual([c["name"] for c in sorted_cheats(self.cheats, "name", False, self.stats)],
+                         ["丙", "乙", "甲"])
+
+    def test_sort_does_not_mutate_source(self):
+        before = [c["code"] for c in self.cheats]
+        sorted_cheats(self.cheats, "count", True, self.stats)
+        self.assertEqual([c["code"] for c in self.cheats], before)
 
 
 if __name__ == "__main__":

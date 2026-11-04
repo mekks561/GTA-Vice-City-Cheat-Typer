@@ -704,7 +704,7 @@ PRESETS = {
 
 def _c(name, code, hotkey, group, note):
     return {"id": uuid.uuid4().hex[:8], "name": name, "code": code,
-            "hotkey": hotkey, "group": group, "note": note}
+            "hotkey": hotkey, "group": group, "note": note, "interval_ms": 0}
 
 
 def default_cheats() -> list[dict]:
@@ -872,6 +872,15 @@ def install_crash_hooks() -> None:
         threading.excepthook = thread_hook
 
 
+def _safe_int(value, default: int = 0, lo: int = 0, hi: int = 1000) -> int:
+    """宽松转 int：脏数据一律回落到 default，绝不让单条坏值毁掉整份配置。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return n if lo <= n <= hi else default
+
+
 def _norm_cheat(item) -> dict | None:
     if not isinstance(item, dict):
         return None
@@ -885,6 +894,8 @@ def _norm_cheat(item) -> dict | None:
         "hotkey": str(item.get("hotkey") or "").strip(),
         "group": str(item.get("group") or "自定义"),
         "note": str(item.get("note") or ""),
+        # 单条发送速度覆盖：0 = 跟随全局（1.6 新增，可选字段，缺省即旧行为）
+        "interval_ms": _safe_int(item.get("interval_ms"), 0, 0, 300) if item.get("interval_ms") else 0,
     }
 
 
@@ -897,6 +908,71 @@ def _norm_stats(raw) -> dict:
     return stats
 
 
+def _norm_today(raw) -> dict:
+    """当日使用计数（跨天自动归零，由 UI 判定日期是否过期）。"""
+    if not isinstance(raw, dict):
+        return {"date": "", "count": 0}
+    return {"date": str(raw.get("date") or ""), "count": max(0, _safe_int(raw.get("count"), 0))}
+
+
+def touch_today(raw, day: str | None = None, bump: bool = True) -> dict:
+    """纯函数：把当日计数推进一天/加一次，返回新字典（便于单测）。"""
+    day = day or time.strftime("%Y-%m-%d")
+    entry = raw if isinstance(raw, dict) else {}
+    if str(entry.get("date") or "") != day:
+        entry = {"date": day, "count": 0}
+    if bump:
+        entry["count"] = max(0, _safe_int(entry.get("count"), 0)) + 1
+    return entry
+
+
+def normalize_store(raw: dict) -> dict:
+    """把任意版本的配置字典归一化为 v2（纯函数，不碰磁盘：整包导入也走这里）。"""
+    settings = dict(DEFAULT_SETTINGS)
+    settings.update({k: v for k, v in (raw.get("settings") or {}).items() if k in DEFAULT_SETTINGS})
+
+    # 方案组：v2 直接读；v1（顶层 cheats）迁移为单个默认方案
+    raw_profiles = raw.get("profiles")
+    if isinstance(raw_profiles, list) and raw_profiles:
+        profiles = []
+        for p in raw_profiles:
+            if not isinstance(p, dict):
+                continue
+            cheats = [c for c in (_norm_cheat(i) for i in (p.get("cheats") or [])) if c]
+            name = str(p.get("name") or "").strip() or "未命名"
+            profiles.append({"name": name, "cheats": cheats})
+    else:
+        cheats = [c for c in (_norm_cheat(i) for i in (raw.get("cheats") or [])) if c]
+        profiles = [{"name": "默认", "cheats": cheats}] if cheats else []
+    if not profiles:
+        profiles = [{"name": "默认", "cheats": default_cheats()}]
+
+    # 方案名去重
+    seen_names: set[str] = set()
+    for p in profiles:
+        name = p["name"]
+        i = 2
+        while name in seen_names:
+            name = f"{p['name']} ({i})"
+            i += 1
+        p["name"] = name
+        seen_names.add(name)
+
+    active = str(raw.get("active_profile") or "").strip()
+    if active not in seen_names:
+        active = profiles[0]["name"]
+
+    return {
+        "app": STORE_APP,
+        "version": STORE_VERSION,
+        "settings": settings,
+        "active_profile": active,
+        "profiles": profiles,
+        "stats": _norm_stats(raw.get("stats")),
+        "today": _norm_today(raw.get("today")),
+    }
+
+
 def default_store() -> dict:
     return {
         "app": STORE_APP,
@@ -905,6 +981,7 @@ def default_store() -> dict:
         "active_profile": "默认",
         "profiles": [{"name": "默认", "cheats": default_cheats()}],
         "stats": {},
+        "today": {"date": "", "count": 0},
     }
 
 
@@ -950,48 +1027,7 @@ def load_store(path: str | None = None) -> dict:
         append_log(LAST_LOAD_WARNING, "ERROR")
         return default_store()
 
-    settings = dict(DEFAULT_SETTINGS)
-    settings.update({k: v for k, v in (raw.get("settings") or {}).items() if k in DEFAULT_SETTINGS})
-
-    # 方案组：v2 直接读；v1（顶层 cheats）迁移为单个默认方案
-    raw_profiles = raw.get("profiles")
-    if isinstance(raw_profiles, list) and raw_profiles:
-        profiles = []
-        for p in raw_profiles:
-            if not isinstance(p, dict):
-                continue
-            cheats = [c for c in (_norm_cheat(i) for i in (p.get("cheats") or [])) if c]
-            name = str(p.get("name") or "").strip() or "未命名"
-            profiles.append({"name": name, "cheats": cheats})
-    else:
-        cheats = [c for c in (_norm_cheat(i) for i in (raw.get("cheats") or [])) if c]
-        profiles = [{"name": "默认", "cheats": cheats}] if cheats else []
-    if not profiles:
-        profiles = [{"name": "默认", "cheats": default_cheats()}]
-
-    # 方案名去重
-    seen_names: set[str] = set()
-    for p in profiles:
-        name = p["name"]
-        i = 2
-        while name in seen_names:
-            name = f"{p['name']} ({i})"
-            i += 1
-        p["name"] = name
-        seen_names.add(name)
-
-    active = str(raw.get("active_profile") or "").strip()
-    if active not in seen_names:
-        active = profiles[0]["name"]
-
-    return {
-        "app": STORE_APP,
-        "version": STORE_VERSION,
-        "settings": settings,
-        "active_profile": active,
-        "profiles": profiles,
-        "stats": _norm_stats(raw.get("stats")),
-    }
+    return normalize_store(raw)
 
 
 def save_store(store: dict, path: str | None = None) -> None:
@@ -1004,6 +1040,7 @@ def save_store(store: dict, path: str | None = None) -> None:
         "active_profile": store.get("active_profile", "默认"),
         "profiles": store.get("profiles", []),
         "stats": store.get("stats", {}),
+        "today": _norm_today(store.get("today")),
     }
     tmp = path + ".tmp"
     try:
@@ -1018,6 +1055,38 @@ def save_store(store: dict, path: str | None = None) -> None:
     except Exception as exc:  # 保存失败不该让工具崩掉
         print("保存配置失败:", exc, file=sys.stderr)
         append_log(f"保存配置失败: {exc}", "ERROR")
+
+
+def bundle_payload(store: dict) -> dict:
+    """整包备份的导出结构：设置 + 全部方案 + 统计 + 当日计数。"""
+    return {
+        "app": STORE_APP,
+        "kind": "bundle",
+        "version": STORE_VERSION,
+        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "settings": dict(store.get("settings") or {}),
+        "active_profile": store.get("active_profile", "默认"),
+        "profiles": store.get("profiles", []),
+        "stats": store.get("stats", {}),
+        "today": _norm_today(store.get("today")),
+    }
+
+
+def parse_bundle(raw) -> tuple[dict | None, str]:
+    """校验并归一化整包文件，返回 (store, 错误说明)。不写盘、不改动源文件。"""
+    if not isinstance(raw, dict):
+        return None, "文件顶层不是 JSON 对象。"
+    app = str(raw.get("app") or "").strip()
+    if app and app != STORE_APP:
+        return None, f"这不是 {APP_NAME} 的备份（app={app}）。"
+    if isinstance(raw.get("profile"), dict) and not raw.get("profiles"):
+        return None, "这是单个方案文件，请用「导入方案」。"
+    if not isinstance(raw.get("profiles"), list) or not raw["profiles"]:
+        return None, "备份里没有任何方案，无法导入。"
+    store = normalize_store(raw)
+    if not any(p["cheats"] for p in store["profiles"]):
+        return None, "备份里的方案都是空的，已取消导入。"
+    return store, ""
 
 
 def bump_stats(stats: dict, code: str) -> int:
@@ -1092,6 +1161,96 @@ def build_bindings(cheats: list[dict], pause_combo: str = "",
         bindings.append((hid, parsed[0], parsed[1], c["id"]))
         hid += 1
     return bindings, conflicts
+
+
+# ----------------------------------------------------------------------------
+# 纯函数：冲突处置（挑一个空闲组合键） / 排序 / DPI 比例
+# ----------------------------------------------------------------------------
+def candidate_combos() -> list[str]:
+    """冲突迁移的候选键序列：F1–F11 → Shift → Ctrl → Ctrl+Shift → Alt。
+
+    刻意避开 F12（系统/调试器常占），也避开字母数字裸键（会吃掉正常打字）。
+    """
+    out: list[str] = []
+    vks = [VK_BY_NAME[f"f{i}"] for i in range(1, 12)]
+    for mods in (0, MOD_SHIFT, MOD_CONTROL, MOD_CONTROL | MOD_SHIFT, MOD_ALT):
+        for vk in vks:
+            if not is_safe_binding(mods, vk):
+                continue
+            combo = format_combo(mods, vk)
+            if combo not in out:
+                out.append(combo)
+    return out
+
+
+def pick_free_combo(cheats: list[dict], pause_combo: str = "", avoid=(),
+                    exclude_id: str = "") -> str:
+    """按候选序列找第一个未被占用（其他秘籍 / 暂停键 / 已知不可用）的组合键。
+
+    没有空闲键时返回空串。avoid 用于记录"注册时报 1409 说明系统真的占着"的键。
+    """
+    taken = set()
+    for c in cheats:
+        if c.get("id") == exclude_id:
+            continue
+        sig = combo_signature(c.get("hotkey") or "")
+        if sig:
+            taken.add(sig)
+    pause_sig = combo_signature(pause_combo)
+    if pause_sig:
+        taken.add(pause_sig)
+    for text in avoid or ():
+        sig = combo_signature(text)
+        if sig:
+            taken.add(sig)
+    for combo in candidate_combos():
+        if combo_signature(combo) not in taken:
+            return combo
+    return ""
+
+
+def sorted_cheats(cheats: list[dict], key: str = "count", desc: bool = True,
+                  stats: dict | None = None) -> list[dict]:
+    """按使用次数 / 最近使用排序（返回副本，不改动原列表顺序由调用方决定）。"""
+    stats = stats or {}
+
+    def metric(c: dict):
+        if key == "name":
+            return str(c.get("name") or "")
+        entry = stats.get(str(c.get("code") or "").upper()) or {}
+        return entry.get("count", 0) if key == "count" else str(entry.get("last") or "")
+
+    return sorted(cheats, key=metric, reverse=desc)
+
+
+def enable_dpi_awareness() -> None:
+    """开启 DPI 感知。必须在 tk.Tk() 之前调用：先建窗口再声明，Tk 已按 96 DPI 初始化，
+    系统会把整窗位图拉伸，字就糊了（125%/150% 缩放下最明显）。"""
+    if not IS_WIN:
+        return
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)   # PROCESS_SYSTEM_DPI_AWARE
+        return
+    except Exception:
+        pass
+    try:
+        user32.SetProcessDPIAware()                      # Win7/8 回退
+    except Exception:
+        pass
+
+
+def ui_scale(root) -> float:
+    """界面缩放系数（96 DPI = 1.0）。VCCT_UI_SCALE 可强制指定，用于三档截图核对。"""
+    forced = os.environ.get("VCCT_UI_SCALE", "").strip()
+    if forced:
+        try:
+            return max(0.8, min(2.5, float(forced)))
+        except ValueError:
+            pass
+    try:
+        return max(1.0, min(2.0, root.winfo_fpixels("1i") / 96.0))
+    except Exception:
+        return 1.0
 
 
 # ----------------------------------------------------------------------------
@@ -1267,6 +1426,25 @@ class CheatDialog(tk.Toplevel):
                         bg="#ffffff", fg="#9aa3ae", font=("Microsoft YaHei UI", 9))
         hint.grid(row=r + 1, column=1, sticky="w")
 
+        # 单条速度覆盖（1.6）：默认跟随全局，个别秘籍可单独放慢
+        own = int(self.cheat.get("interval_ms") or 0)
+        self.var_follow = tk.BooleanVar(value=own <= 0)
+        self.var_interval = tk.IntVar(
+            value=own or int((getattr(app, "settings", {}) or {}).get("char_interval_ms", 45)))
+        row_s = r + 2
+        tk.Label(body, text="发送间隔", bg="#ffffff", fg="#374151",
+                 font=("Microsoft YaHei UI", 10)).grid(row=row_s, column=0, sticky="w", pady=7, padx=(0, 12))
+        spd = tk.Frame(body, bg="#ffffff")
+        spd.grid(row=row_s, column=1, sticky="ew", pady=7)
+        self.spin_interval = ttk.Spinbox(spd, from_=20, to=300, increment=5, width=6,
+                                         textvariable=self.var_interval)
+        self.spin_interval.pack(side="left")
+        tk.Label(spd, text="ms / 字", bg="#ffffff", fg="#6b7280",
+                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(6, 0))
+        ttk.Checkbutton(spd, text="跟随全局", variable=self.var_follow,
+                        command=self._sync_interval).pack(side="left", padx=(12, 0))
+        self._sync_interval()
+
         bar = tk.Frame(self, bg="#ffffff")
         bar.pack(fill="x", padx=12, pady=(0, 12))
         ttk.Button(bar, text="保存", style="Accent.TButton", command=self._on_ok).pack(side="right")
@@ -1285,6 +1463,9 @@ class CheatDialog(tk.Toplevel):
 
     def _capture(self):
         HotkeyCapture(self, self.hotkey, self._set_hot)
+
+    def _sync_interval(self):
+        self.spin_interval.configure(state="disabled" if self.var_follow.get() else "normal")
 
     def _set_hot(self, combo: str):
         self.hotkey = combo
@@ -1315,6 +1496,15 @@ class CheatDialog(tk.Toplevel):
                                        "无修饰键的单键会拦截正常打字，请加 Ctrl/Alt/Shift 或改用 F1-F12。",
                                        parent=self)
                 return
+        interval = 0
+        if not self.var_follow.get():
+            try:
+                interval = int(self.var_interval.get())
+            except (tk.TclError, ValueError):
+                interval = -1
+            if not 20 <= interval <= 300:
+                messagebox.showwarning("间隔不合法", "单条发送间隔需在 20–300 ms 之间。", parent=self)
+                return
         self.result = {
             "id": self.cheat.get("id") or uuid.uuid4().hex[:8],
             "name": name,
@@ -1322,6 +1512,7 @@ class CheatDialog(tk.Toplevel):
             "hotkey": self.hotkey.strip(),
             "group": (self.var_group.get() or "自定义").strip(),
             "note": self.var_note.get().strip(),
+            "interval_ms": interval,
         }
         self.destroy()
 
@@ -1334,6 +1525,7 @@ C = {
     "text": "#1a1f29", "muted": "#6b7280", "accent": "#2563eb",
     "ok": "#067647", "warn": "#b42318", "soft": "#eef4ff",
 }
+WIN_W, WIN_H = 1040, 700   # 96 DPI 下的基准尺寸，实际按 ui 比例放大
 
 
 class CheatApp:
@@ -1356,6 +1548,8 @@ class CheatApp:
         self.last_error = ""
         self.paused = False              # 暂停状态不持久化：重启即恢复工作（安全侧）
         self._undo: dict | None = None   # 仅保留最近一步删除
+        self._avoid: set[str] = set()    # 注册时报"已被占用"的键，自动分配时跳过
+        self._auto_fix: dict | None = None
 
         self._setup_style()
         self._build_ui()
@@ -1376,10 +1570,14 @@ class CheatApp:
 
     # -- 外观 ---------------------------------------------------------------
     def _setup_style(self):
+        self.ui = ui_scale(self.root)
         self.root.title(f"{APP_NAME} v{APP_VER}")
         self.root.configure(bg=C["bg"])
-        self.root.geometry("1000x680")
-        self.root.minsize(880, 580)
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w = min(int(WIN_W * self.ui), max(640, sw - 40))
+        h = min(int(WIN_H * self.ui), max(480, sh - 90))
+        self.root.geometry(f"{w}x{h}")
+        self.root.minsize(min(int(900 * self.ui), w), min(int(600 * self.ui), h))
         style = ttk.Style(self.root)
         try:
             style.theme_use("clam")
@@ -1401,7 +1599,7 @@ class CheatApp:
                         foreground="#ffffff", borderwidth=0)
         style.map("Danger.TButton", background=[("active", "#b91c1c"), ("pressed", "#991b1b")])
         style.configure("Treeview", background=C["panel"], fieldbackground=C["panel"],
-                        foreground=C["text"], rowheight=27, borderwidth=0,
+                        foreground=C["text"], rowheight=int(27 * self.ui), borderwidth=0,
                         font=("Microsoft YaHei UI", 10))
         style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 9, "bold"),
                         background="#eef1f6", foreground="#374151", relief="flat", padding=(6, 6))
@@ -1510,25 +1708,38 @@ class CheatApp:
         self.lbl_count = ttk.Label(srow, text="", style="Muted.TLabel")
         self.lbl_count.pack(side="left")
         ttk.Button(srow, text="清空", width=5, command=self.clear_search).pack(side="left", padx=(10, 0))
-        ttk.Button(srow, text="打开日志", command=self.open_log).pack(side="right")
-        ttk.Button(srow, text="从备份恢复", command=self.restore_backup).pack(side="right", padx=(0, 8))
+
+        mb = ttk.Menubutton(srow, text="⋯ 更多")
+        mb.pack(side="right")
+        more = tk.Menu(mb, tearoff=0)
+        more.add_command(label="导出整包（设置 + 全部方案 + 统计）", command=self.export_bundle)
+        more.add_command(label="导入整包…", command=self.import_bundle)
+        more.add_separator()
+        more.add_command(label="从上一版备份恢复", command=self.restore_backup)
+        more.add_command(label="打开日志目录", command=self.open_log)
+        more.add_separator()
+        more.add_command(label="清空使用统计", command=self.clear_stats)
+        mb.configure(menu=more)
 
         # 列表
         list_wrap = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
                              highlightbackground=C["line"])
         list_wrap.pack(fill="both", expand=True)
 
-        cols = ("idx", "name", "code", "hotkey", "state", "count", "note")
+        cols = ("idx", "name", "code", "hotkey", "state", "count", "last", "note")
         self.tree = ttk.Treeview(list_wrap, columns=cols, show="headings", selectmode="browse")
-        headings = {"idx": ("#", 40, "center"), "name": ("名称", 158, "w"),
-                    "code": ("秘籍代码", 208, "w"), "hotkey": ("快捷键", 122, "center"),
-                    "state": ("状态", 68, "center"), "count": ("次数", 52, "center"),
-                    "note": ("备注", 290, "w")}
+        headings = {"idx": ("#", 36, "center"), "name": ("名称", 148, "w"),
+                    "code": ("秘籍代码", 190, "w"), "hotkey": ("快捷键", 114, "center"),
+                    "state": ("状态", 56, "center"), "count": ("次数", 48, "center"),
+                    "last": ("最近", 96, "center"), "note": ("备注", 250, "w")}
         for key, (text, width, anchor) in headings.items():
             self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor=anchor,
-                             stretch=(key in ("name", "note")))
-        self.tree.heading("count", text="次数 ↓", command=self.sort_by_usage)
+            self.tree.column(key, width=int(width * self.ui), minwidth=int(width * self.ui * 0.6),
+                             anchor=anchor, stretch=(key in ("name", "note")))
+        self._sort_key, self._sort_desc = "count", True
+        self.tree.heading("count", text="次数 ↓", command=lambda: self.sort_by("count"))
+        self.tree.heading("last", text="最近", command=lambda: self.sort_by("last"))
+        self.tree.heading("name", text="名称", command=lambda: self.sort_by("name"))
         vsb = ttk.Scrollbar(list_wrap, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -1538,7 +1749,14 @@ class CheatApp:
         self.tree.tag_configure("unbound", foreground="#98a2b3")
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
         self.tree.bind("<Return>", lambda e: self.send_selected())
+        self.tree.bind("<Button-3>", self._popup_row_menu)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_hint())
+
+        self.menu_row = tk.Menu(self.root, tearoff=0)
+        self.menu_row.add_command(label="换一个可用键（本行）", command=self.fix_selected_conflict)
+        self.menu_row.add_command(label="自动分配全部冲突项", command=self.auto_fix_conflicts)
+        self.menu_row.add_separator()
+        self.menu_row.add_command(label="复制秘籍代码", command=self.copy_code)
 
         # 操作区
         ops = ttk.Frame(outer)
@@ -1685,11 +1903,25 @@ class CheatApp:
     def _bump_stats(self, cheat_id: str, code: str):
         try:
             count = bump_stats(self.stats, code)
+            self.store["today"] = touch_today(self.store.get("today"))
             if cheat_id and self.tree.exists(cheat_id):
                 self.tree.set(cheat_id, "count", str(count))
+                self.tree.set(cheat_id, "last", time.strftime("%m-%d %H:%M"))
+            self._update_count_label(len(self.tree.get_children()))
             self.persist()
         except Exception:
             pass
+
+    def clear_stats(self):
+        if not messagebox.askyesno("清空统计",
+                                   "将把「次数 / 最近使用 / 今日次数」全部归零，不影响秘籍与快捷键。继续？",
+                                   parent=self.root):
+            return
+        self.stats.clear()
+        self.store["today"] = {"date": "", "count": 0}
+        self.persist()
+        self.refresh_tree()
+        self.log("使用统计已清空。", "ok")
 
     def _on_probe_done(self, ok: bool, got_fg: bool, got: str):
         if ok:
@@ -1700,11 +1932,21 @@ class CheatApp:
             self.log(f"注入自检：✖ {detail}。多见于杀软拦截 SendInput 或会话输入状态异常。", "warn")
             self.show_toast("✖ 注入自检未通过", "warn")
 
-    def sort_by_usage(self):
-        self.cheats.sort(key=lambda c: -self.stats.get(c.get("code", ""), {}).get("count", 0))
+    def sort_by(self, key: str):
+        """点击表头排序：次数 / 最近 / 名称；再点一次反向。"""
+        if getattr(self, "_sort_key", "") == key:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_key, self._sort_desc = key, key != "name"
+        self.cheats[:] = sorted_cheats(self.cheats, key, self._sort_desc, self.stats)
         self.persist()
         self.refresh_tree()
-        self.log("已按使用次数排序（快捷键跟着条目走，不受影响）。", "info")
+        labels = {"count": "次数", "last": "最近", "name": "名称"}
+        arrow = " ↓" if self._sort_desc else " ↑"
+        for k, text in labels.items():
+            self.tree.heading(k, text=text + (arrow if k == key else ""))
+        self.log(f"已按「{labels.get(key, key)}」{'降序' if self._sort_desc else '升序'}排序（快捷键跟着条目走）。",
+                 "info")
 
     # -- 列表渲染 ------------------------------------------------------------
     def _refresh_group_choices(self):
@@ -1725,10 +1967,7 @@ class CheatApp:
         sel = self.selected_id()
         self.tree.delete(*self.tree.get_children())
         items = self.visible_cheats()
-        if self.var_search.get().strip():
-            self.lbl_count.configure(text=f"匹配 {len(items)} / 共 {len(self.cheats)} 条")
-        else:
-            self.lbl_count.configure(text=f"共 {len(items)} 条")
+        self._update_count_label(len(items))
         for i, c in enumerate(items, 1):
             state = "就绪"
             tags = ["odd"] if i % 2 == 0 else []
@@ -1740,11 +1979,15 @@ class CheatApp:
             elif not c.get("hotkey"):
                 state = "未绑定"
                 tags.append("unbound")
-            used = self.stats.get(c["code"], {}).get("count", 0)
+            entry = self.stats.get(c["code"], {})
+            used = entry.get("count", 0)
+            last = str(entry.get("last") or "")
+            if len(last) >= 16:
+                last = last[5:]          # 去掉年份，保持列窄
             self.tree.insert("", "end", iid=c["id"], tags=tags,
                              values=(i, c.get("name", ""), c.get("code", ""),
                                      c.get("hotkey") or "—", state, used or "—",
-                                     c.get("note", "")))
+                                     last or "—", c.get("note", "")))
         if sel and self.tree.exists(sel):
             self.tree.selection_set(sel)
             self.tree.see(sel)
@@ -1752,6 +1995,19 @@ class CheatApp:
             first = self.tree.get_children()[0]
             self.tree.selection_set(first)
         self._update_hint()
+
+    def _update_count_label(self, shown: int):
+        if self.var_search.get().strip() or self.var_group_filter.get() != "全部":
+            text = f"匹配 {shown} / 共 {len(self.cheats)} 条"
+        else:
+            text = f"共 {shown} 条"
+        self.lbl_count.configure(text=f"{text} · 今日 {self.today_count()} 次")
+
+    def today_count(self) -> int:
+        t = self.store.get("today") or {}
+        if str(t.get("date") or "") != time.strftime("%Y-%m-%d"):
+            return 0
+        return max(0, _safe_int(t.get("count"), 0))
 
     def _update_hint(self):
         cid = self.selected_id()
@@ -1766,7 +2022,9 @@ class CheatApp:
         extra = ""
         if c["id"] in self.conflicts:
             extra = f"　⚠ {self.conflicts[c['id']]}"
-        self.lbl_hint.configure(text=f"{c['name']}　→　{c['code']}　·　快捷键 {hk}{extra}")
+        speed = c.get("interval_ms") or 0
+        speed_text = f"　·　单条间隔 {speed}ms" if speed else ""
+        self.lbl_hint.configure(text=f"{c['name']}　→　{c['code']}　·　快捷键 {hk}{speed_text}{extra}")
 
     def by_id(self, cid: str):
         return next((c for c in self.cheats if c["id"] == cid), None)
@@ -1789,6 +2047,7 @@ class CheatApp:
         self.hotkey_owner = id_map
         occupied = []
         denied = []
+        occupied_ids = []
         cheat_results = {k: v for k, v in results.items() if k != PAUSE_ID}
         for cheat_id, (ok, err) in cheat_results.items():
             if ok:
@@ -1798,6 +2057,9 @@ class CheatApp:
             if err == ERROR_HOTKEY_ALREADY_REGISTERED:
                 self.conflicts[cheat_id] = f"系统或其他程序已占用 {combo}"
                 occupied.append(combo)
+                occupied_ids.append(cheat_id)
+                if combo:
+                    self._avoid.add(combo)   # 记住它真的被占着，后续自动分配不再选它
             elif err == ERROR_ACCESS_DENIED:
                 self.conflicts[cheat_id] = "权限不足（目标程序可能以管理员运行）"
                 denied.append(combo)
@@ -1832,6 +2094,82 @@ class CheatApp:
         else:
             self.lbl_state.configure(text=f"✔ {ok_count} 个快捷键全部生效")
             self.log(f"快捷键注册完成，共 {ok_count} 个生效。", "ok")
+
+        # 自动分配后仍有键被系统占着 → 换下一批候选键，最多 2 轮（避免死循环）
+        fix, self._auto_fix = self._auto_fix, None
+        if fix and fix["round"] < 2 and occupied_ids:
+            targets = [cid for cid in occupied_ids if self.by_id(cid)]
+            if targets:
+                rnd = fix["round"] + 1
+                self.log(f"仍有 {len(targets)} 个键被系统占用，自动换下一批候选（第 {rnd} 轮）。", "info")
+                self.root.after(10, lambda t=targets, r=rnd: self._assign_free_combos(t, r))
+
+    # -- 冲突处置 -----------------------------------------------------------
+    def _popup_row_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if row:
+            self.tree.selection_set(row)
+        try:
+            self.menu_row.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.menu_row.grab_release()
+
+    def copy_code(self):
+        cid = self.selected_id()
+        c = self.by_id(cid) if cid else None
+        if not c:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(c["code"])
+        self.log(f"已复制代码 {c['code']}", "ok")
+
+    def fix_selected_conflict(self):
+        cid = self.selected_id()
+        if not cid or not self.by_id(cid):
+            return
+        if not self._assign_free_combos([cid], 0):
+            messagebox.showinfo("没有空闲键",
+                                "候选组合键（F1–F11 及 Shift/Ctrl/Ctrl+Shift/Alt 组合）都已被占用，"
+                                "请双击该行手动指定一个。", parent=self.root)
+
+    def auto_fix_conflicts(self):
+        ids = [cid for cid in self.conflicts if cid != PAUSE_ID and self.by_id(cid)]
+        if not ids:
+            self.log("当前没有需要处置的快捷键冲突。", "info")
+            self.show_toast("没有冲突项", "ok")
+            return
+        changed = self._assign_free_combos(ids, 0)
+        if changed:
+            self.log(f"为 {len(changed)} 个冲突项分配了空闲键，正在重新注册…", "info")
+        else:
+            self.log("没有可用的空闲组合键了。", "warn")
+
+    def _assign_free_combos(self, ids, round_no: int = 0):
+        """给指定条目挑空闲键并重注册；返回 [(名称, 新键)]。"""
+        changed = []
+        for cid in ids:
+            c = self.by_id(cid)
+            if not c:
+                continue
+            avoid = list(self._avoid)
+            if cid in self.conflicts:      # 已知有问题的键必须换掉，不能原地打转
+                avoid.append(c.get("hotkey") or "")
+            combo = pick_free_combo(self.cheats, self.settings.get("pause_hotkey", ""),
+                                    avoid, exclude_id=cid)
+            if not combo:
+                break
+            if combo == (c.get("hotkey") or ""):
+                continue
+            changed.append((c["name"], combo))
+            c["hotkey"] = combo
+        if not changed:
+            return changed
+        self._auto_fix = {"ids": list(ids), "round": round_no}
+        self.persist()
+        self.apply_hotkeys()
+        for name, combo in changed:
+            self.log(f"冲突处置：「{name}」→ {combo}", "ok")
+        return changed
 
     # -- 暂停 / 恢复 ---------------------------------------------------------
     def toggle_pause(self):
@@ -1900,7 +2238,9 @@ class CheatApp:
     def _send_worker(self, cheat: dict, params: dict):
         try:
             code = cheat.get("code", "")
-            interval, pre = params["interval"], params["pre"]
+            pre = params["pre"]
+            # 单条覆盖优先（1.6）：0 = 跟随全局
+            interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
             hold = min(max(8, interval // 2), 60)
             check_fg = params["check_fg"]
 
@@ -2190,6 +2530,59 @@ class CheatApp:
             self.log(f"已导出方案到 {path}", "ok")
         except Exception as exc:
             messagebox.showerror("导出失败", str(exc), parent=self.root)
+
+    def export_bundle(self):
+        stamp = time.strftime("%Y%m%d")
+        path = filedialog.asksaveasfilename(
+            title="导出整包", defaultextension=".json",
+            initialfile=f"VC-Cheat-Typer-整包-{stamp}.json",
+            filetypes=[("JSON", "*.json")], parent=self.root)
+        if not path:
+            return
+        payload = bundle_payload({
+            "settings": self.settings, "active_profile": self.active_profile,
+            "profiles": self.store["profiles"], "stats": self.stats,
+            "today": self.store.get("today"),
+        })
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc), parent=self.root)
+            return
+        total = sum(len(p["cheats"]) for p in self.store["profiles"])
+        self.log(f"已导出整包：{len(self.store['profiles'])} 个方案 / {total} 条秘籍 → {path}", "ok")
+        self.show_toast("✔ 整包已导出", "ok")
+
+    def import_bundle(self):
+        path = filedialog.askopenfilename(title="导入整包（覆盖当前全部方案与设置）",
+                                          filetypes=[("JSON", "*.json")], parent=self.root)
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception as exc:
+            messagebox.showerror("导入失败", f"文件不是有效的 JSON：{exc}", parent=self.root)
+            return
+        store, err = parse_bundle(raw)
+        if store is None:
+            messagebox.showwarning("导入失败", err, parent=self.root)
+            return
+        total = sum(len(p["cheats"]) for p in store["profiles"])
+        if not messagebox.askyesno(
+                "确认覆盖",
+                f"将用整包内容覆盖当前所有方案与设置：\n\n"
+                f"方案 {len(store['profiles'])} 个 / 秘籍 {total} 条\n"
+                f"导出时间：{raw.get('exported_at') or '未知'}\n\n"
+                f"当前内容会先记入 cheats.bak.json，可再回滚。继续？",
+                parent=self.root):
+            return
+        self._undo = None
+        self._adopt_store(store)
+        self.persist()
+        self.log(f"整包导入完成：{len(store['profiles'])} 个方案 / {total} 条秘籍，"
+                 f"当前「{self.active_profile}」。", "ok")
 
     def import_profile(self):
         path = filedialog.askopenfilename(title="导入方案",
@@ -2489,11 +2882,15 @@ def main() -> int:
         root.destroy()
         return 0
 
+    enable_dpi_awareness()   # 必须在 tk.Tk() 之前
+
     root = tk.Tk()
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
+    forced = os.environ.get("VCCT_UI_SCALE", "").strip()
+    if forced:  # 仅供三档缩放截图核对：让字体的像素尺寸按比例放大
+        try:
+            root.tk.call("tk", "scaling", 96.0 / 72.0 * float(forced))
+        except Exception:
+            pass
     CheatApp(root)
     root.mainloop()
     return 0
