@@ -1,5 +1,7 @@
 # VC-Cheat-Typer
 
+[![CI](https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml/badge.svg)](https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml)
+
 > GTA: Vice City（罪恶都市）秘籍一键输入器 — Windows / 单文件 / 零第三方依赖
 
 一个**单文件、零第三方依赖**的 Windows 桌面小工具：按一下快捷键，它替你在游戏里"打字"输入秘籍。
@@ -15,6 +17,22 @@
 - 注入自检：一键验证"扫描码 → 虚拟键 → WM_CHAR"全链路，无需进游戏
 - 导入/导出：一键分享整份方案
 - 配置持久化：方案、设置、使用统计保存在同目录 cheats.json（v2 格式，自动迁移 v1）
+- 全局暂停：一键注销全部秘籍热键（默认 `Ctrl+Alt+P`），在聊天窗口/编辑器里也不怕误触
+- 搜索：名称/代码/备注/分组实时过滤，与分组筛选叠加（`Ctrl+F` 聚焦，`Esc` 清空）
+- 撤销：删除秘籍/方案后可 `Ctrl+Z` 恢复（保留最近一步）
+- 数据安全：配置每次保存前自动留上一版（`cheats.bak.json`），损坏文件隔离留存并可一键恢复
+- 可诊断：运行日志与崩溃堆栈自动写入 `logs/app.log`（窗口闪退也能查到原因）
+
+## v1.6 更新内容
+
+| 新增 | 说明 |
+|---|---|
+| 全局暂停 / 恢复 | 右上角按钮或 `Ctrl+Alt+P`（可改）。暂停时注销全部秘籍热键，仅保留暂停键本身；重启后不保持暂停（安全侧） |
+| 搜索框 | 与分组下拉叠加过滤，实时显示「匹配 N / 共 M 条」；`Ctrl+F` 聚焦、`Esc` 清空 |
+| 单步撤销 | 删除秘籍或方案后 `Ctrl+Z` / 「撤销」按钮恢复，切换方案即清空撤销栈 |
+| 配置容错与备份 | cheats.json 解析失败 → 原文件改名 `cheats.corrupt-<时间戳>.json` 留存并弹窗提示；每次保存前自动备份上一版，「从备份恢复」一键回滚 |
+| 日志与崩溃捕获 | 界面日志同步写 `logs/app.log`（1MB 滚动保留 3 份）；未捕获异常（含子线程）落盘并弹窗告知路径；exe 只读目录时自动退到 `%LOCALAPPDATA%` |
+| CI | GitHub Actions（Windows，Python 3.10/3.12）：ruff + 单元测试 + 编译检查，push 即回归 |
 
 ## v1.5 更新内容
 
@@ -170,6 +188,9 @@ vc-cheats/
 ├── vc_cheat_typer.py  主程序（单文件）
 ├── run.bat            启动器（找 pythonw 后台运行）
 ├── cheats.json        你的方案组 + 设置 + 统计（自动生成，可直接备份/分享）
+├── cheats.bak.json    上一版配置自动备份（每次保存时生成）
+├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
+├── docs/ROADMAP-1.6.md   1.6 版本规划
 ├── pyproject.toml     开发期工具配置（ruff；运行时不需要）
 ├── tests/             回归测试集（python -m unittest discover -s tests）
 └── README.md          本文件

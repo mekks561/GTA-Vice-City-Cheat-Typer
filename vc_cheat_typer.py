@@ -40,15 +40,17 @@ import json
 import os
 import queue
 import re
+import shutil
 import sys
 import threading
 import time
 import tkinter as tk
+import traceback
 import uuid
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "1.5"
+APP_VER = "1.6"
 IS_WIN = os.name == "nt"
 
 # ----------------------------------------------------------------------------
@@ -690,6 +692,7 @@ DEFAULT_SETTINGS = {
     "uppercase": False,
     "disable_ime": True,      # 发送期间临时摘掉目标窗口的输入法关联（绕开中文 IME 吞字）
     "show_toast": True,       # 游戏内悬浮提示（不抢焦点）
+    "pause_hotkey": "Ctrl+Alt+P",  # 全局暂停：一键关掉全部秘籍热键（防止在别的窗口误触）
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢
@@ -745,9 +748,128 @@ def default_cheats() -> list[dict]:
     ]
 
 
+def app_dir() -> str:
+    """程序所在目录：打包后是 exe 所在目录，源码运行时是本文件所在目录。"""
+    return os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, "frozen", False) else __file__))
+
+
 def data_path() -> str:
-    base = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, "frozen", False) else __file__))
-    return os.path.join(base, "cheats.json")
+    return os.path.join(app_dir(), "cheats.json")
+
+
+def backup_path(path: str | None = None) -> str:
+    """上一版配置的备份路径（与配置文件同目录）。"""
+    return os.path.join(os.path.dirname(path or data_path()), "cheats.bak.json")
+
+
+# ----------------------------------------------------------------------------
+# 日志（1.6）
+# windowed 模式没有控制台，崩溃/异常若不落盘就等于不可诊断
+# ----------------------------------------------------------------------------
+LOG_MAX_BYTES = 1024 * 1024
+LOG_KEEP = 3
+_log_dir_cache: str | None = None
+_crash_dialog_open = False
+
+
+def _writable(path: str) -> bool:
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".write-test")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+def log_dir() -> str:
+    """优先 exe 同目录 logs/；不可写（如装在 Program Files）则退到 %LOCALAPPDATA%。"""
+    global _log_dir_cache
+    if _log_dir_cache:
+        return _log_dir_cache
+    preferred = os.path.join(app_dir(), "logs")
+    if _writable(preferred):
+        _log_dir_cache = preferred
+        return preferred
+    fallback = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                            APP_NAME, "logs")
+    _writable(fallback)
+    _log_dir_cache = fallback
+    return fallback
+
+
+def log_file() -> str:
+    return os.path.join(log_dir(), "app.log")
+
+
+def _rotate_log(path: str) -> None:
+    try:
+        if os.path.getsize(path) < LOG_MAX_BYTES:
+            return
+    except OSError:
+        return
+    for i in range(LOG_KEEP - 1, 0, -1):
+        src = f"{path}.{i}"
+        if os.path.exists(src):
+            try:
+                os.replace(src, f"{path}.{i + 1}")
+            except OSError:
+                pass
+    try:
+        os.replace(path, f"{path}.1")
+    except OSError:
+        pass
+
+
+def append_log(text: str, level: str = "INFO") -> None:
+    """写文件日志；失败一律吞掉——日志不能反过来把程序搞崩。"""
+    try:
+        path = log_file()
+        _rotate_log(path)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} [{level}] {text}\n")
+    except Exception:
+        pass
+
+
+def _show_crash_dialog(title: str, detail: str) -> None:
+    global _crash_dialog_open
+    if _crash_dialog_open:  # 防止异常里再弹异常，无限递归
+        return
+    _crash_dialog_open = True
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(title, detail)
+        root.destroy()
+    except Exception:
+        pass
+    finally:
+        _crash_dialog_open = False
+
+
+def install_crash_hooks() -> None:
+    """未捕获异常（主线程 + 子线程）落盘，并告知用户日志位置。"""
+    def handle(exc_type, exc, tb, thread_name="main"):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        append_log(f"未捕获异常（{thread_name}）\n{text}", "ERROR")
+        _show_crash_dialog(
+            f"{APP_NAME} 遇到问题",
+            f"程序捕获到未处理的异常，已写入日志：\n{log_file()}\n\n{exc_type.__name__}: {exc}")
+
+    def main_hook(exc_type, exc, tb):
+        handle(exc_type, exc, tb, "main")
+
+    def thread_hook(args):
+        handle(args.exc_type, args.exc_value, args.exc_traceback,
+               getattr(args.thread, "name", "thread"))
+
+    sys.excepthook = main_hook
+    if hasattr(threading, "excepthook"):
+        threading.excepthook = thread_hook
 
 
 def _norm_cheat(item) -> dict | None:
@@ -786,8 +908,24 @@ def default_store() -> dict:
     }
 
 
+LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）
+
+
+def quarantine_corrupt(path: str) -> str:
+    """把无法解析的配置改名留存，返回新路径；改名失败返回空串。"""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = os.path.join(os.path.dirname(path), f"cheats.corrupt-{stamp}.json")
+    try:
+        os.replace(path, target)
+        return target
+    except OSError:
+        return ""
+
+
 def load_store(path: str | None = None) -> dict:
-    """读取配置并归一化为 v2 结构；损坏/缺失字段一律回退默认，不让工具崩掉。"""
+    """读取配置并归一化为 v2 结构；损坏文件会被隔离留存，绝不静默丢数据。"""
+    global LAST_LOAD_WARNING
+    LAST_LOAD_WARNING = ""
     path = path or data_path()
     if not os.path.exists(path):
         store = default_store()
@@ -796,9 +934,20 @@ def load_store(path: str | None = None) -> dict:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
-    except Exception:
+    except Exception as exc:
+        moved = quarantine_corrupt(path)
+        LAST_LOAD_WARNING = (
+            f"配置文件无法解析（{exc}）。" +
+            (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "原文件保留在原处。") +
+            " 已载入默认秘籍表。")
+        append_log(LAST_LOAD_WARNING, "ERROR")
         return default_store()
     if not isinstance(raw, dict):
+        moved = quarantine_corrupt(path)
+        LAST_LOAD_WARNING = ("配置文件结构不正确（顶层不是对象）。" +
+                             (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "") +
+                             " 已载入默认秘籍表。")
+        append_log(LAST_LOAD_WARNING, "ERROR")
         return default_store()
 
     settings = dict(DEFAULT_SETTINGS)
@@ -860,9 +1009,15 @@ def save_store(store: dict, path: str | None = None) -> None:
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
+        if os.path.exists(path):  # 覆盖前留一版，误操作/损坏可回滚
+            try:
+                shutil.copyfile(path, backup_path(path))
+            except OSError:
+                pass
         os.replace(tmp, path)
     except Exception as exc:  # 保存失败不该让工具崩掉
         print("保存配置失败:", exc, file=sys.stderr)
+        append_log(f"保存配置失败: {exc}", "ERROR")
 
 
 def bump_stats(stats: dict, code: str) -> int:
@@ -872,6 +1027,71 @@ def bump_stats(stats: dict, code: str) -> int:
     entry["count"] = int(entry.get("count", 0)) + 1
     entry["last"] = time.strftime("%Y-%m-%d %H:%M")
     return entry["count"]
+
+
+# ----------------------------------------------------------------------------
+# 纯函数：列表过滤 / 热键表构建（不依赖 Tk，便于单元测试）
+# ----------------------------------------------------------------------------
+PAUSE_ID = "__pause__"   # 暂停键在热键表里的虚拟条目 id
+PAUSE_HID = 9000         # 避开 1..N 的秘籍热键 id
+
+
+def filter_cheats(items: list[dict], group: str = "全部", query: str = "") -> list[dict]:
+    """分组 + 关键字（名称/代码/备注/分组，大小写不敏感）叠加过滤。"""
+    out = list(items)
+    if group and group != "全部":
+        out = [c for c in out if (c.get("group") or "自定义") == group]
+    q = (query or "").strip().lower()
+    if q:
+        out = [c for c in out
+               if q in " ".join(str(c.get(k) or "") for k in ("name", "code", "note", "group")).lower()]
+    return out
+
+
+def build_bindings(cheats: list[dict], pause_combo: str = "",
+                   include_cheats: bool = True) -> tuple[list, dict]:
+    """构造热键注册表。
+
+    返回 (bindings, conflicts)：
+      bindings  = [(hotkey_id, mods, vk, owner_id), ...]
+      conflicts = {owner_id: 原因}
+    暂停时 include_cheats=False —— 只保留暂停键本身，其余全部不注册。
+    """
+    bindings: list[tuple[int, int, int, str]] = []
+    conflicts: dict[str, str] = {}
+    seen: dict[tuple[int, int], str] = {}
+
+    if pause_combo:
+        parsed = parse_combo(pause_combo)
+        if parsed:
+            bindings.append((PAUSE_HID, parsed[0], parsed[1], PAUSE_ID))
+            seen[parsed] = PAUSE_ID
+        else:
+            conflicts[PAUSE_ID] = f"暂停键「{pause_combo}」无法解析"
+
+    if not include_cheats:
+        return bindings, conflicts
+
+    hid = 1
+    for c in cheats:
+        combo = (c.get("hotkey") or "").strip()
+        if not combo:
+            continue
+        parsed = parse_combo(combo)
+        if not parsed:
+            conflicts[c["id"]] = f"快捷键「{combo}」无法解析，已跳过"
+            continue
+        if parsed in seen:
+            if seen[parsed] == PAUSE_ID:
+                conflicts[c["id"]] = f"与暂停键冲突（{combo}）"
+            else:
+                other = next((x for x in cheats if x["id"] == seen[parsed]), None)
+                conflicts[c["id"]] = f"与「{other['name'] if other else '?'}」重复（{combo}）"
+            continue
+        seen[parsed] = c["id"]
+        bindings.append((hid, parsed[0], parsed[1], c["id"]))
+        hid += 1
+    return bindings, conflicts
 
 
 # ----------------------------------------------------------------------------
@@ -1121,6 +1341,7 @@ class CheatApp:
         self.root = root
         self.events: queue.Queue = queue.Queue()
         self.store = load_store()
+        self.load_warning = LAST_LOAD_WARNING
         self.settings = self.store["settings"]
         self.stats = self.store["stats"]
         self.active_profile = self.store["active_profile"]
@@ -1133,6 +1354,8 @@ class CheatApp:
         self.game_info: tuple[int, str, str] = (0, "", "")
         self._toast: tk.Toplevel | None = None
         self.last_error = ""
+        self.paused = False              # 暂停状态不持久化：重启即恢复工作（安全侧）
+        self._undo: dict | None = None   # 仅保留最近一步删除
 
         self._setup_style()
         self._build_ui()
@@ -1143,6 +1366,13 @@ class CheatApp:
         self.root.after(40, self._pump)
         self.root.after(1500, self._update_game_status)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        append_log(f"启动 {APP_NAME} v{APP_VER}；配置文件 {data_path()}；日志 {log_file()}")
+        if self.load_warning:
+            self.log("⚠ " + self.load_warning, "warn")
+            self.root.after(300, lambda: messagebox.showwarning(
+                "配置文件已隔离", self.load_warning + "\n\n可从「从备份恢复」找回上一版配置。",
+                parent=self.root))
 
     # -- 外观 ---------------------------------------------------------------
     def _setup_style(self):
@@ -1167,6 +1397,9 @@ class CheatApp:
         style.configure("Accent.TButton", padding=(14, 6), background=C["accent"],
                         foreground="#ffffff", borderwidth=0)
         style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("pressed", "#1e40af")])
+        style.configure("Danger.TButton", padding=(12, 5), background="#dc2626",
+                        foreground="#ffffff", borderwidth=0)
+        style.map("Danger.TButton", background=[("active", "#b91c1c"), ("pressed", "#991b1b")])
         style.configure("Treeview", background=C["panel"], fieldbackground=C["panel"],
                         foreground=C["text"], rowheight=27, borderwidth=0,
                         font=("Microsoft YaHei UI", 10))
@@ -1186,11 +1419,13 @@ class CheatApp:
 
         head = ttk.Frame(outer)
         head.pack(fill="x")
-        ttk.Label(head, text="罪恶都市 · 秘籍一键输入", style="H1.TLabel").pack(side="left")
-        ttk.Label(head, text="  快捷键触发 · 自动键盘输入 · 前台校验",
+        ttk.Label(head, text=APP_NAME, style="H1.TLabel").pack(side="left")
+        ttk.Label(head, text=f"  v{APP_VER} · 快捷键触发 · 自动键盘输入 · 前台校验",
                   style="Muted.TLabel").pack(side="left", pady=(6, 0))
+        self.btn_pause = ttk.Button(head, text="⏸ 暂停热键", width=12, command=self.toggle_pause)
+        self.btn_pause.pack(side="right", pady=(2, 0))
         self.lbl_state = ttk.Label(head, text="初始化…", style="Muted.TLabel")
-        self.lbl_state.pack(side="right", pady=(6, 0))
+        self.lbl_state.pack(side="right", pady=(6, 0), padx=(0, 12))
         self.lbl_game = ttk.Label(head, text="⚪ 检测游戏…", style="Muted.TLabel")
         self.lbl_game.pack(side="right", pady=(6, 0), padx=(0, 16))
 
@@ -1261,6 +1496,23 @@ class CheatApp:
         ttk.Checkbutton(row2, text="悬浮提示", variable=self.var_toast,
                         command=self._on_setting_change).pack(side="left", padx=(18, 0))
 
+        # 搜索（与分组筛选叠加生效）
+        srow = tk.Frame(outer, bg=C["bg"])
+        srow.pack(fill="x", pady=(0, 8))
+        tk.Label(srow, text="搜索", bg=C["bg"], fg=C["muted"],
+                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self.var_search = tk.StringVar()
+        self.ent_search = tk.Entry(srow, textvariable=self.var_search, font=("Microsoft YaHei UI", 10),
+                                   relief="flat", bg="#ffffff", highlightthickness=1,
+                                   highlightbackground=C["line"], highlightcolor=C["accent"], width=34)
+        self.ent_search.pack(side="left", ipady=3, padx=(8, 8))
+        self.ent_search.bind("<KeyRelease>", lambda e: self.refresh_tree())
+        self.lbl_count = ttk.Label(srow, text="", style="Muted.TLabel")
+        self.lbl_count.pack(side="left")
+        ttk.Button(srow, text="清空", width=5, command=self.clear_search).pack(side="left", padx=(10, 0))
+        ttk.Button(srow, text="打开日志", command=self.open_log).pack(side="right")
+        ttk.Button(srow, text="从备份恢复", command=self.restore_backup).pack(side="right", padx=(0, 8))
+
         # 列表
         list_wrap = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
                              highlightbackground=C["line"])
@@ -1296,6 +1548,7 @@ class CheatApp:
         ttk.Button(ops, text="添加", command=self.add_cheat).pack(side="left", padx=(8, 0))
         ttk.Button(ops, text="编辑", command=self.edit_selected).pack(side="left", padx=(6, 0))
         ttk.Button(ops, text="删除", command=self.delete_selected).pack(side="left", padx=(6, 0))
+        ttk.Button(ops, text="撤销", command=self.undo_last).pack(side="left", padx=(6, 0))
         ttk.Button(ops, text="注入自检", command=self.open_test_window).pack(side="left", padx=(18, 0))
         ttk.Button(ops, text="↑", width=3, command=lambda: self.move(-1)).pack(side="right")
         ttk.Button(ops, text="↓", width=3, command=lambda: self.move(1)).pack(side="right", padx=(0, 6))
@@ -1317,6 +1570,16 @@ class CheatApp:
         self._refresh_group_choices()
         self._refresh_profile_choices()
 
+        # 全局快捷键（界面内）：搜索 / 撤销 / 清空搜索
+        self.root.bind("<Control-f>", lambda e: self._focus_search())
+        self.root.bind("<Control-z>", lambda e: self.undo_last())
+        self.root.bind("<Escape>", lambda e: self.clear_search())
+
+    def _focus_search(self):
+        self.ent_search.focus_set()
+        self.ent_search.select_range(0, "end")
+        return "break"
+
     # -- 日志 / 事件泵 -------------------------------------------------------
     def log(self, text: str, kind: str = "info", from_thread: bool = False):
         if from_thread:
@@ -1326,6 +1589,7 @@ class CheatApp:
         self.txt_log.insert("end", time.strftime("[%H:%M:%S] ") + text + "\n", kind)
         self.txt_log.see("end")
         self.txt_log.configure(state="disabled")
+        append_log(text, "WARN" if kind == "warn" else "INFO")
 
     def _pump(self):
         try:
@@ -1353,6 +1617,9 @@ class CheatApp:
     def _on_hotkey(self, hid: int):
         cheat_id = self.hotkey_owner.get(hid)
         if not cheat_id:
+            return
+        if cheat_id == PAUSE_ID:
+            self.toggle_pause()
             return
         self.send_by_id(cheat_id)
 
@@ -1451,18 +1718,22 @@ class CheatApp:
             self.var_group_filter.set("全部")
 
     def visible_cheats(self) -> list[dict]:
-        g = self.var_group_filter.get()
-        if g == "全部":
-            return list(self.cheats)
-        return [c for c in self.cheats if (c.get("group") or "自定义") == g]
+        return filter_cheats(self.cheats, self.var_group_filter.get(), self.var_search.get())
 
     def refresh_tree(self):
         self._refresh_group_choices()
         sel = self.selected_id()
         self.tree.delete(*self.tree.get_children())
-        for i, c in enumerate(self.visible_cheats(), 1):
+        items = self.visible_cheats()
+        if self.var_search.get().strip():
+            self.lbl_count.configure(text=f"匹配 {len(items)} / 共 {len(self.cheats)} 条")
+        else:
+            self.lbl_count.configure(text=f"共 {len(items)} 条")
+        for i, c in enumerate(items, 1):
             state = "就绪"
             tags = ["odd"] if i % 2 == 0 else []
+            if self.paused:
+                state = "暂停"
             if c["id"] in self.conflicts:
                 state = "冲突"
                 tags.append("conflict")
@@ -1506,35 +1777,20 @@ class CheatApp:
 
     # -- 热键注册 ------------------------------------------------------------
     def apply_hotkeys(self):
+        """统一入口：先清冲突，再整体注销/重注册（暂停时只留暂停键）。"""
         self.conflicts.clear()
-        bindings = []
-        seen: dict[tuple[int, int], str] = {}
-        hid = 1
-        for c in self.cheats:
-            combo = (c.get("hotkey") or "").strip()
-            if not combo:
-                continue
-            parsed = parse_combo(combo)
-            if not parsed:
-                self.conflicts[c["id"]] = f"快捷键「{combo}」无法解析，已跳过"
-                continue
-            mods, vk = parsed
-            sig = (mods, vk)
-            if sig in seen:
-                other = self.by_id(seen[sig])
-                self.conflicts[c["id"]] = f"与「{other['name'] if other else '?'}」重复（{combo}）"
-                continue
-            seen[sig] = c["id"]
-            bindings.append((hid, mods, vk, c["id"]))
-            hid += 1
+        bindings, conflicts = build_bindings(
+            self.cheats, self.settings.get("pause_hotkey", ""), include_cheats=not self.paused)
+        self.conflicts.update(conflicts)
         self.engine.apply(bindings)
-        self.lbl_state.configure(text="注册快捷键…")
+        self.lbl_state.configure(text="已暂停 · 仅暂停键生效…" if self.paused else "注册快捷键…")
 
     def _on_hotkeys_applied(self, results: dict, id_map: dict):
         self.hotkey_owner = id_map
         occupied = []
         denied = []
-        for cheat_id, (ok, err) in results.items():
+        cheat_results = {k: v for k, v in results.items() if k != PAUSE_ID}
+        for cheat_id, (ok, err) in cheat_results.items():
             if ok:
                 continue
             c = self.by_id(cheat_id)
@@ -1548,13 +1804,24 @@ class CheatApp:
             else:
                 self.conflicts[cheat_id] = f"注册失败，错误码 {err}（{combo}）"
                 occupied.append(combo)
+
+        pause_res = results.get(PAUSE_ID)
+        pause_combo = self.settings.get("pause_hotkey", "")
+        if pause_res and not pause_res[0]:
+            self.conflicts[PAUSE_ID] = f"暂停键 {pause_combo} 注册失败（错误码 {pause_res[1]}）"
         self.refresh_tree()
 
-        ok_count = sum(1 for ok, _ in results.values() if ok)
-        if self.conflicts:
-            msg = f"⚠ {len(self.conflicts)} 个快捷键不可用（{ok_count} 个生效）"
+        ok_count = sum(1 for ok, _ in cheat_results.values() if ok)
+        cheat_conflicts = {k: v for k, v in self.conflicts.items() if k != PAUSE_ID}
+        if PAUSE_ID in self.conflicts:
+            self.log(f"暂停键不可用：{self.conflicts[PAUSE_ID]}。"
+                     f"请换一个组合（如 Ctrl+Alt+Shift+P）。", "warn")
+        if self.paused:
+            self.lbl_state.configure(text=f"⏸ 已暂停（{pause_combo} 恢复）")
+        elif cheat_conflicts:
+            msg = f"⚠ {len(cheat_conflicts)} 个快捷键不可用（{ok_count} 个生效）"
             self.lbl_state.configure(text=msg)
-            for cid, reason in self.conflicts.items():
+            for cid, reason in cheat_conflicts.items():
                 c = self.by_id(cid)
                 self.log(f"快捷键冲突：{c['name'] if c else cid} — {reason}", "warn")
             if occupied:
@@ -1565,6 +1832,25 @@ class CheatApp:
         else:
             self.lbl_state.configure(text=f"✔ {ok_count} 个快捷键全部生效")
             self.log(f"快捷键注册完成，共 {ok_count} 个生效。", "ok")
+
+    # -- 暂停 / 恢复 ---------------------------------------------------------
+    def toggle_pause(self):
+        self.paused = not self.paused
+        self._update_pause_ui()
+        self.apply_hotkeys()
+        combo = self.settings.get("pause_hotkey", "Ctrl+Alt+P")
+        if self.paused:
+            self.log(f"⏸ 已暂停：全部秘籍热键已注销（按 {combo} 恢复）。", "warn")
+            self.show_toast(f"⏸ 已暂停热键 · {combo} 恢复", "warn")
+        else:
+            self.log(f"▶ 已恢复：秘籍热键重新生效（按 {combo} 可再次暂停）。", "ok")
+            self.show_toast("▶ 热键已恢复", "ok")
+
+    def _update_pause_ui(self):
+        if self.paused:
+            self.btn_pause.configure(text="▶ 恢复热键", style="Danger.TButton")
+        else:
+            self.btn_pause.configure(text="⏸ 暂停热键", style="TButton")
 
     # -- 发送 ---------------------------------------------------------------
     def _fg_ok(self, keywords: list[str]) -> bool:
@@ -1712,11 +1998,61 @@ class CheatApp:
             return
         if not messagebox.askyesno("删除秘籍", f"确定删除「{c['name']}」？", parent=self.root):
             return
+        self._undo = {"kind": "cheat", "profile": self.active_profile,
+                      "index": self.cheats.index(c), "cheat": dict(c)}
         self.cheats.remove(c)
         self.persist()
         self.refresh_tree()
         self.apply_hotkeys()
-        self.log(f"已删除「{c['name']}」", "warn")
+        self.log(f"已删除「{c['name']}」（可点「撤销」或 Ctrl+Z 恢复）", "warn")
+
+    def clear_search(self):
+        if self.var_search.get():
+            self.var_search.set("")
+            self.refresh_tree()
+        return "break"
+
+    def undo_last(self):
+        """撤销最近一次删除（仅保留一步）。"""
+        if isinstance(self.root.focus_get(), (tk.Entry, ttk.Entry)):
+            return  # 正在输入框里，交给文本框自己的撤销
+        u = self._undo
+        if not u:
+            self.log("没有可撤销的操作（只保留最近一次删除）。", "info")
+            return
+        self._undo = None
+        if u["kind"] == "cheat":
+            prof = next((p for p in self.store["profiles"] if p["name"] == u["profile"]), None)
+            if prof is None:
+                self.log("撤销失败：原方案已不存在。", "warn")
+                return
+            if prof["name"] != self.active_profile:
+                self.active_profile = prof["name"]
+                self.cheats = prof["cheats"]
+                self.var_profile.set(self.active_profile)
+                self._refresh_profile_choices()
+            idx = min(u["index"], len(prof["cheats"]))
+            prof["cheats"].insert(idx, u["cheat"])
+            self.persist()
+            self.refresh_tree()
+            self.apply_hotkeys()
+            self.log(f"已撤销删除：「{u['cheat']['name']}」已恢复。", "ok")
+        elif u["kind"] == "profile":
+            prof = u["profile"]
+            name, i = prof["name"], 2
+            while any(p["name"] == name for p in self.store["profiles"]):
+                name = f"{prof['name']} ({i})"
+                i += 1
+            prof["name"] = name
+            self.store["profiles"].append(prof)
+            self.active_profile = name
+            self.cheats = prof["cheats"]
+            self.persist()
+            self.var_profile.set(name)
+            self._refresh_profile_choices()
+            self.refresh_tree()
+            self.apply_hotkeys()
+            self.log(f"已撤销删除：方案「{name}」已恢复。", "ok")
 
     def move(self, delta: int):
         cid = self.selected_id()
@@ -1759,6 +2095,7 @@ class CheatApp:
         self.active_profile = name
         self.cheats = prof["cheats"]
         self.var_group_filter.set("全部")
+        self._undo = None  # 撤销栈绑定当前方案，切换即清空，避免恢复到别的方案
         self.persist()
         self.refresh_tree()
         self.apply_hotkeys()
@@ -1810,6 +2147,9 @@ class CheatApp:
         if not messagebox.askyesno("删除方案",
                                    f"确定删除方案「{self.active_profile}」？", parent=self.root):
             return
+        prof = next(p for p in self.store["profiles"] if p["name"] == self.active_profile)
+        self._undo = {"kind": "profile",
+                      "profile": {"name": prof["name"], "cheats": [dict(c) for c in prof["cheats"]]}}
         self.store["profiles"] = [p for p in self.store["profiles"] if p["name"] != self.active_profile]
         self.active_profile = self.store["profiles"][0]["name"]
         self.cheats = self.store["profiles"][0]["cheats"]
@@ -1818,7 +2158,7 @@ class CheatApp:
         self.var_profile.set(self.active_profile)
         self.refresh_tree()
         self.apply_hotkeys()
-        self.log(f"方案已删除，当前为「{self.active_profile}」。", "warn")
+        self.log(f"方案已删除，当前为「{self.active_profile}」（可 Ctrl+Z 撤销）。", "warn")
 
     # -- 参数预设 / 导入导出 --------------------------------------------------
     def apply_preset(self, name: str):
@@ -1898,6 +2238,57 @@ class CheatApp:
         save_store(self.store)
 
     # -- 其他交互 -----------------------------------------------------------
+    def open_log(self):
+        try:
+            os.startfile(log_dir())  # noqa: S606 - 打开自己写的日志目录
+            self.log(f"日志目录：{log_dir()}", "info")
+        except Exception as exc:
+            messagebox.showinfo("日志位置", f"{log_dir()}\n\n（自动打开失败：{exc}）", parent=self.root)
+
+    def _adopt_store(self, store: dict):
+        """整体接管一份 store（备份恢复用），保持 cheats 与 store 内列表的引用关系。"""
+        self.store = store
+        self.settings = store["settings"]
+        self.stats = store["stats"]
+        self.active_profile = store["active_profile"]
+        prof = next((p for p in store["profiles"] if p["name"] == self.active_profile),
+                    store["profiles"][0])
+        self.active_profile = prof["name"]
+        self.cheats = prof["cheats"]
+        self.var_kw.set(self.settings.get("target_keywords", ""))
+        self.var_fg.set(bool(self.settings.get("require_foreground", True)))
+        self.var_ime.set(bool(self.settings.get("disable_ime", True)))
+        self.var_delay.set(int(self.settings.get("char_interval_ms", 45)))
+        self.var_toast.set(bool(self.settings.get("show_toast", True)))
+        self.var_profile.set(self.active_profile)
+        self.var_group_filter.set("全部")
+        self._refresh_profile_choices()
+        self.refresh_tree()
+        self.apply_hotkeys()
+
+    def restore_backup(self):
+        bak = backup_path()
+        if not os.path.exists(bak):
+            messagebox.showinfo("没有备份",
+                                f"还没有备份文件：\n{bak}\n\n"
+                                f"备份会在每次保存配置时自动生成（保留上一版）。",
+                                parent=self.root)
+            return
+        if not messagebox.askyesno("从备份恢复",
+                                   f"将用上一版配置覆盖当前内容：\n{bak}\n\n"
+                                   f"当前配置会先被备份，可再次回滚。继续？",
+                                   parent=self.root):
+            return
+        store = load_store(bak)
+        if LAST_LOAD_WARNING:
+            messagebox.showerror("备份不可用", LAST_LOAD_WARNING, parent=self.root)
+            return
+        self._undo = None
+        self._adopt_store(store)
+        self.persist()
+        self.log(f"已从备份恢复（方案 {len(store['profiles'])} 个，"
+                 f"当前「{self.active_profile}」{len(self.cheats)} 条）。", "ok")
+
     def pick_window(self):
         title, exe = foreground_info()
         if not title and not exe:
@@ -1933,6 +2324,7 @@ class CheatApp:
             self.engine.shutdown()
         except Exception:
             pass
+        append_log(f"退出 {APP_NAME} v{APP_VER}")
         self.root.destroy()
 
 
@@ -1991,6 +2383,46 @@ def selftest() -> int:
         print(f"    统计累计: {n1} -> {n2}（同一秘籍按 code 合并，大小写不敏感）")
         ok &= n1 == 1 and n2 == 2
 
+    print("[2c] 配置容错与备份")
+    with tempfile.TemporaryDirectory() as td:
+        bad = os.path.join(td, "cheats.json")
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("{ this is not valid json")
+        st = load_store(bad)
+        quarantined = [n for n in os.listdir(td) if n.startswith("cheats.corrupt-")]
+        print(f"    损坏文件隔离: {quarantined or '未生成'}；载入条目 {len(st['profiles'][0]['cheats'])}")
+        ok &= bool(quarantined) and bool(LAST_LOAD_WARNING)
+
+        good = os.path.join(td, "cheats2.json")
+        save_store(default_store(), good)
+        save_store(default_store(), good)
+        has_bak = os.path.exists(os.path.join(td, "cheats.bak.json"))
+        print(f"    上一版备份: {'已生成 cheats.bak.json' if has_bak else '缺失'}")
+        ok &= has_bak
+
+    print("[2d] 暂停热键表 / 搜索过滤")
+    bp, cp = build_bindings(default_cheats(), "Ctrl+Alt+P", include_cheats=False)
+    print(f"    暂停时热键表 {len(bp)} 条（应为 1 条 = 暂停键）")
+    ok &= len(bp) == 1 and bp[0][3] == PAUSE_ID and not cp
+    bn, cn = build_bindings(default_cheats(), "Ctrl+Alt+P", include_cheats=True)
+    print(f"    正常时热键表 {len(bn)} 条，冲突 {len(cn)}")
+    ok &= len(bn) > 20 and not cn
+    hits = filter_cheats(default_cheats(), "全部", "aspirine")
+    print(f"    搜索 'aspirine'（代码）命中 {len(hits)} 条")
+    ok &= len(hits) == 1
+    hits2 = filter_cheats(default_cheats(), "全部", "满血")
+    print(f"    搜索 '满血'（名称）命中 {len(hits2)} 条")
+    ok &= len(hits2) >= 1
+    both = filter_cheats(default_cheats(), "武器", "tools")
+    print(f"    分组+搜索叠加（武器/tools）命中 {len(both)} 条，且全部属于武器组")
+    ok &= len(both) == 3 and all((c.get("group") or "") == "武器" for c in both)
+    only_car = filter_cheats(default_cheats(), "载具", "panzer")
+    print(f"    分组+搜索叠加（载具/panzer）命中 {len(only_car)} 条")
+    ok &= len(only_car) == 1 and only_car[0]["code"] == "PANZER"
+    grp = filter_cheats(default_cheats(), "武器", "")
+    print(f"    分组「武器」筛选 {len(grp)} 条")
+    ok &= len(grp) >= 1
+
     print("[3] 前台窗口探测：", foreground_info())
 
     # 真实注入测试：隐藏原生 Win32 窗口验证"扫描码→VK→WM_CHAR"全链路
@@ -2043,6 +2475,9 @@ def main() -> int:
         return 1
     if "--selftest" in sys.argv:
         return selftest()
+
+    install_crash_hooks()   # 之后任何未捕获异常都会落盘到 logs/app.log
+    append_log(f"===== 进程启动 pid={os.getpid()} =====")
 
     # 单实例：避免两个进程抢同一批全局热键，注册失败会让人误以为是"冲突"
     # 句柄必须保持存活直到进程退出，故赋值给变量（ruff F841 特批）

@@ -8,6 +8,9 @@ __pycache__/
 # 用户本地配置（含个人使用统计，不随仓库分发）
 cheats.json
 cheats.json.tmp
+cheats.bak.json
+cheats.corrupt-*.json
+logs/
 
 # 构建产物
 build/
