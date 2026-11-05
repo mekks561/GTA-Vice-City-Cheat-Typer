@@ -1525,7 +1525,7 @@ C = {
     "text": "#1a1f29", "muted": "#6b7280", "accent": "#2563eb",
     "ok": "#067647", "warn": "#b42318", "soft": "#eef4ff",
 }
-WIN_W, WIN_H = 1040, 700   # 96 DPI 下的基准尺寸，实际按 ui 比例放大
+WIN_W, WIN_H = 1120, 700   # 96 DPI 下的基准尺寸，实际按 ui 比例放大
 
 
 class CheatApp:
