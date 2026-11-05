@@ -202,7 +202,8 @@ vc-cheats/
 ├── cheats.json        你的方案组 + 设置 + 统计（自动生成，可直接备份/分享）
 ├── cheats.bak.json    上一版配置自动备份（每次保存时生成）
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
-├── docs/ROADMAP-1.6.md   1.6 版本规划
+├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
+├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
 ├── pyproject.toml     开发期工具配置（ruff；运行时不需要）
 ├── tests/             回归测试集（python -m unittest discover -s tests）
 └── README.md          本文件
