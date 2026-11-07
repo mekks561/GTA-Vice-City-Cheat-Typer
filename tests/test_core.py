@@ -39,7 +39,8 @@ from vc_cheat_typer import (  # noqa: E402
     sorted_cheats,
     touch_today,
 )
-import vc_cheat_typer as _module  # noqa: E402  （需要读模块级 LAST_LOAD_WARNING）
+import vc_cheat_typer as _module  # noqa: E402
+import vcct.store as _store  # noqa: E402  （需要读模块级 LAST_LOAD_WARNING）
 
 
 class TestCombo(unittest.TestCase):
@@ -238,7 +239,7 @@ class TestResilience(unittest.TestCase):
                 fh.write("{ 坏掉的 JSON")
             store = load_store(path)
             self.assertTrue(store["profiles"][0]["cheats"])
-            self.assertTrue(_module.LAST_LOAD_WARNING, "应记录可展示的告警")
+            self.assertTrue(_store.last_load_warning(), "应记录可展示的告警")
             leftovers = [n for n in os.listdir(td) if n.startswith("cheats.corrupt-")]
             self.assertEqual(len(leftovers), 1, "损坏文件应改名留存而不是被覆盖")
             self.assertFalse(os.path.exists(path), "损坏文件应被移走，便于重新生成默认配置")
@@ -263,7 +264,7 @@ class TestResilience(unittest.TestCase):
             save_store(default_store(), path)
             save_store(default_store(), path)
             bak = os.path.join(td, "cheats.bak.json")
-            self.assertEqual(_module.LAST_LOAD_WARNING, "")
+            self.assertEqual(_store.last_load_warning(), "")
             restored = load_store(bak)
             self.assertEqual(restored["version"], STORE_VERSION)
 

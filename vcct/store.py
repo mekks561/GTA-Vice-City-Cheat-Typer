@@ -1,0 +1,322 @@
+# -*- coding: utf-8 -*-
+"""1.7：配置数据层——归一化、加载/保存、备份、整包导入导出、统计、过滤。
+
+不依赖 tkinter，可在无桌面环境下测试。
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+import time
+import uuid
+
+from .const import APP_NAME, DEFAULT_SETTINGS, STORE_APP, STORE_VERSION
+from .loggingx import append_log, backup_path, data_path
+
+def _c(name, code, hotkey, group, note):
+    return {"id": uuid.uuid4().hex[:8], "name": name, "code": code,
+            "hotkey": hotkey, "group": group, "note": note, "interval_ms": 0}
+
+
+def default_cheats() -> list[dict]:
+    return [
+        # 武器
+        _c("一级武器", "THUGSTOOLS", "F1", "武器", "指虎/球棒/燃烧瓶/手枪/霰弹…重复输入可无限弹药"),
+        _c("二级武器", "PROFESSIONALTOOLS", "F2", "武器", "武士刀/357/SPAS12/M4/火箭筒…"),
+        _c("三级武器", "NUTTERTOOLS", "F3", "武器", "电锯/手雷/加特林…"),
+        # 生存
+        _c("满血", "ASPIRINE", "F4", "生存", "开车时同时修轮胎"),
+        _c("满护甲", "PRECIOUSPROTECTION", "F5", "生存", "护甲补满"),
+        # 通缉
+        _c("清除通缉", "LEAVEMEALONE", "F6", "通缉", "通缉星级归零"),
+        _c("通缉 +2 星", "YOUWONTTAKEMEALIVE", "F7", "通缉", "每次 +2 星，慎用"),
+        # 载具生成（默认不使用 F12：该键常被系统/调试器占用）
+        _c("犀牛坦克", "PANZER", "F8", "载具", "在最近的车辆生成点出现"),
+        _c("Sabre Turbo", "GETTHEREFAST", "F9", "载具", "肌肉跑车"),
+        _c("高尔夫球车", "BETTERTHANWALKING", "F10", "载具", "Caddy"),
+        _c("灵车", "THELASTRIDE", "F11", "载具", "Romero's Hearse"),
+        _c("Love Fist 加长车", "ROCKANDROLLCAR", "Shift+F1", "载具", "加长礼车"),
+        _c("垃圾车", "RUBBISHCAR", "Shift+F2", "载具", "Trashmaster"),
+        # 载具特性
+        _c("水上行驶", "SEAWAYS", "Shift+F3", "改装", "车辆可在水面行驶，再输一次取消"),
+        _c("飞行汽车", "COMEFLYWITHME", "Shift+F4", "改装", "低重力，空中可控；直升机操作会变怪"),
+        _c("操控提升", "GRIPISEVERYTHING", "Shift+F5", "改装", "抓地力/转向改善"),
+        _c("超大轮子", "LOADSOFLITTLETHINGS", "Shift+F6", "改装", "车轮变大，重复输入继续变"),
+        _c("隐形车", "WHEELSAREALLINEED", "Shift+F7", "改装", "只显示车轮"),
+        _c("炸毁所有车", "BIGBANG", "Shift+F8", "改装", "附近车辆全部爆炸，会波及自己"),
+        # 交通
+        _c("全绿灯", "GREENLIGHT", "Shift+F9", "交通", "所有红绿灯变绿"),
+        _c("疯狂驾驶", "MIAMITRAFFIC", "Shift+F10", "交通", "NPC 驾驶变得激进"),
+        # 天气
+        _c("晴天", "ALOVELYDAY", "Shift+F11", "天气", "晴朗天气"),
+        _c("多云", "APLEASANTDAY", "Ctrl+Shift+F1", "天气", "阴天/多云"),
+        _c("暴雨", "CATSANDDOGS", "Ctrl+Shift+F2", "天气", "风暴天气"),
+        # 市民
+        _c("市民暴动", "FIGHTFIGHTFIGHT", "Ctrl+Shift+F3", "市民", "★不可撤销：存盘后会永久影响存档"),
+        _c("武装女性", "CHICKSWITHGUNS", "Ctrl+Shift+F4", "市民", "比基尼女性持枪"),
+        _c("人人持枪", "OURGODGIVENRIGHTTOBEARARMS", "Ctrl+Shift+F5", "市民", "★不可撤销，会严重影响任务"),
+        _c("女性跟随", "FANNYMAGNET", "Ctrl+Shift+F6", "市民", "特定女性会跟随 Tommy"),
+    ]
+
+
+def _safe_int(value, default: int = 0, lo: int = 0, hi: int = 1000) -> int:
+    """宽松转 int：脏数据一律回落到 default，绝不让单条坏值毁掉整份配置。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return n if lo <= n <= hi else default
+
+
+def _norm_cheat(item) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    code = str(item.get("code") or "").strip().upper()
+    if not code:
+        return None
+    return {
+        "id": str(item.get("id") or uuid.uuid4().hex[:8]),
+        "name": str(item.get("name") or code),
+        "code": code,
+        "hotkey": str(item.get("hotkey") or "").strip(),
+        "group": str(item.get("group") or "自定义"),
+        "note": str(item.get("note") or ""),
+        # 单条发送速度覆盖：0 = 跟随全局（1.6 新增，可选字段，缺省即旧行为）
+        "interval_ms": _safe_int(item.get("interval_ms"), 0, 0, 300) if item.get("interval_ms") else 0,
+    }
+
+
+def _norm_stats(raw) -> dict:
+    stats = {}
+    if isinstance(raw, dict):
+        for code, v in raw.items():
+            if isinstance(v, dict) and isinstance(v.get("count"), int):
+                stats[str(code).upper()] = {"count": int(v["count"]), "last": str(v.get("last") or "")}
+    return stats
+
+
+def _norm_today(raw) -> dict:
+    """当日使用计数（跨天自动归零，由 UI 判定日期是否过期）。"""
+    if not isinstance(raw, dict):
+        return {"date": "", "count": 0}
+    return {"date": str(raw.get("date") or ""), "count": max(0, _safe_int(raw.get("count"), 0))}
+
+
+def touch_today(raw, day: str | None = None, bump: bool = True) -> dict:
+    """纯函数：把当日计数推进一天/加一次，返回新字典（便于单测）。"""
+    day = day or time.strftime("%Y-%m-%d")
+    entry = raw if isinstance(raw, dict) else {}
+    if str(entry.get("date") or "") != day:
+        entry = {"date": day, "count": 0}
+    if bump:
+        entry["count"] = max(0, _safe_int(entry.get("count"), 0)) + 1
+    return entry
+
+
+def normalize_store(raw: dict) -> dict:
+    """把任意版本的配置字典归一化为 v2（纯函数，不碰磁盘：整包导入也走这里）。"""
+    settings = dict(DEFAULT_SETTINGS)
+    settings.update({k: v for k, v in (raw.get("settings") or {}).items() if k in DEFAULT_SETTINGS})
+
+    # 方案组：v2 直接读；v1（顶层 cheats）迁移为单个默认方案
+    raw_profiles = raw.get("profiles")
+    if isinstance(raw_profiles, list) and raw_profiles:
+        profiles = []
+        for p in raw_profiles:
+            if not isinstance(p, dict):
+                continue
+            cheats = [c for c in (_norm_cheat(i) for i in (p.get("cheats") or [])) if c]
+            name = str(p.get("name") or "").strip() or "未命名"
+            profiles.append({"name": name, "cheats": cheats})
+    else:
+        cheats = [c for c in (_norm_cheat(i) for i in (raw.get("cheats") or [])) if c]
+        profiles = [{"name": "默认", "cheats": cheats}] if cheats else []
+    if not profiles:
+        profiles = [{"name": "默认", "cheats": default_cheats()}]
+
+    # 方案名去重
+    seen_names: set[str] = set()
+    for p in profiles:
+        name = p["name"]
+        i = 2
+        while name in seen_names:
+            name = f"{p['name']} ({i})"
+            i += 1
+        p["name"] = name
+        seen_names.add(name)
+
+    active = str(raw.get("active_profile") or "").strip()
+    if active not in seen_names:
+        active = profiles[0]["name"]
+
+    return {
+        "app": STORE_APP,
+        "version": STORE_VERSION,
+        "settings": settings,
+        "active_profile": active,
+        "profiles": profiles,
+        "stats": _norm_stats(raw.get("stats")),
+        "today": _norm_today(raw.get("today")),
+    }
+
+
+def default_store() -> dict:
+    return {
+        "app": STORE_APP,
+        "version": STORE_VERSION,
+        "settings": dict(DEFAULT_SETTINGS),
+        "active_profile": "默认",
+        "profiles": [{"name": "默认", "cheats": default_cheats()}],
+        "stats": {},
+        "today": {"date": "", "count": 0},
+    }
+
+
+LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）
+
+
+def last_load_warning() -> str:
+    """读取最近一次加载告警。
+
+    必须用函数而不是 `from vcct.store import LAST_LOAD_WARNING`：
+    load_store 会重新绑定这个全局，按值导入拿到的永远是导入那一刻的空串。
+    """
+    return LAST_LOAD_WARNING
+
+
+def quarantine_corrupt(path: str) -> str:
+    """把无法解析的配置改名留存，返回新路径；改名失败返回空串。"""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = os.path.join(os.path.dirname(path), f"cheats.corrupt-{stamp}.json")
+    try:
+        os.replace(path, target)
+        return target
+    except OSError:
+        return ""
+
+
+def load_store(path: str | None = None) -> dict:
+    """读取配置并归一化为 v2 结构；损坏文件会被隔离留存，绝不静默丢数据。"""
+    global LAST_LOAD_WARNING
+    LAST_LOAD_WARNING = ""
+    path = path or data_path()
+    if not os.path.exists(path):
+        store = default_store()
+        save_store(store, path)
+        return store
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except Exception as exc:
+        moved = quarantine_corrupt(path)
+        LAST_LOAD_WARNING = (
+            f"配置文件无法解析（{exc}）。" +
+            (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "原文件保留在原处。") +
+            " 已载入默认秘籍表。")
+        append_log(LAST_LOAD_WARNING, "ERROR")
+        return default_store()
+    if not isinstance(raw, dict):
+        moved = quarantine_corrupt(path)
+        LAST_LOAD_WARNING = ("配置文件结构不正确（顶层不是对象）。" +
+                             (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "") +
+                             " 已载入默认秘籍表。")
+        append_log(LAST_LOAD_WARNING, "ERROR")
+        return default_store()
+
+    return normalize_store(raw)
+
+
+def save_store(store: dict, path: str | None = None) -> None:
+    path = path or data_path()
+    settings = {k: v for k, v in (store.get("settings") or {}).items() if k in DEFAULT_SETTINGS}
+    payload = {
+        "app": STORE_APP,
+        "version": STORE_VERSION,
+        "settings": settings,
+        "active_profile": store.get("active_profile", "默认"),
+        "profiles": store.get("profiles", []),
+        "stats": store.get("stats", {}),
+        "today": _norm_today(store.get("today")),
+    }
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        if os.path.exists(path):  # 覆盖前留一版，误操作/损坏可回滚
+            try:
+                shutil.copyfile(path, backup_path(path))
+            except OSError:
+                pass
+        os.replace(tmp, path)
+    except Exception as exc:  # 保存失败不该让工具崩掉
+        print("保存配置失败:", exc, file=sys.stderr)
+        append_log(f"保存配置失败: {exc}", "ERROR")
+
+
+def bundle_payload(store: dict) -> dict:
+    """整包备份的导出结构：设置 + 全部方案 + 统计 + 当日计数。"""
+    return {
+        "app": STORE_APP,
+        "kind": "bundle",
+        "version": STORE_VERSION,
+        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "settings": dict(store.get("settings") or {}),
+        "active_profile": store.get("active_profile", "默认"),
+        "profiles": store.get("profiles", []),
+        "stats": store.get("stats", {}),
+        "today": _norm_today(store.get("today")),
+    }
+
+
+def parse_bundle(raw) -> tuple[dict | None, str]:
+    """校验并归一化整包文件，返回 (store, 错误说明)。不写盘、不改动源文件。"""
+    if not isinstance(raw, dict):
+        return None, "文件顶层不是 JSON 对象。"
+    app = str(raw.get("app") or "").strip()
+    if app and app != STORE_APP:
+        return None, f"这不是 {APP_NAME} 的备份（app={app}）。"
+    if isinstance(raw.get("profile"), dict) and not raw.get("profiles"):
+        return None, "这是单个方案文件，请用「导入方案」。"
+    if not isinstance(raw.get("profiles"), list) or not raw["profiles"]:
+        return None, "备份里没有任何方案，无法导入。"
+    store = normalize_store(raw)
+    if not any(p["cheats"] for p in store["profiles"]):
+        return None, "备份里的方案都是空的，已取消导入。"
+    return store, ""
+
+
+def bump_stats(stats: dict, code: str) -> int:
+    """累计使用次数，返回新次数（纯函数，便于测试）"""
+    key = str(code).upper()
+    entry = stats.setdefault(key, {"count": 0, "last": ""})
+    entry["count"] = int(entry.get("count", 0)) + 1
+    entry["last"] = time.strftime("%Y-%m-%d %H:%M")
+    return entry["count"]
+
+
+def filter_cheats(items: list[dict], group: str = "全部", query: str = "") -> list[dict]:
+    """分组 + 关键字（名称/代码/备注/分组，大小写不敏感）叠加过滤。"""
+    out = list(items)
+    if group and group != "全部":
+        out = [c for c in out if (c.get("group") or "自定义") == group]
+    q = (query or "").strip().lower()
+    if q:
+        out = [c for c in out
+               if q in " ".join(str(c.get(k) or "") for k in ("name", "code", "note", "group")).lower()]
+    return out
+
+
+def sorted_cheats(cheats: list[dict], key: str = "count", desc: bool = True,
+                  stats: dict | None = None) -> list[dict]:
+    """按使用次数 / 最近使用排序（返回副本，不改动原列表顺序由调用方决定）。"""
+    stats = stats or {}
+
+    def metric(c: dict):
+        if key == "name":
+            return str(c.get("name") or "")
+        entry = stats.get(str(c.get("code") or "").upper()) or {}
+        return entry.get("count", 0) if key == "count" else str(entry.get("last") or "")
+
+    return sorted(cheats, key=metric, reverse=desc)
