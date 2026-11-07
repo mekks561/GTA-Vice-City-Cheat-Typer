@@ -153,6 +153,15 @@ def node_names(node):
 
 
 def main() -> int:
+    # 防误触发：本脚本会按 git 中的原始单文件重建 vcct/，覆盖后续所有手改。
+    # 迁移完成后重跑必须显式 --force，且应先把 SRC 还原到迁移前的提交。
+    pkg_dir = os.path.join(ROOT, "vcct")
+    if os.path.isdir(pkg_dir) and "--force" not in sys.argv:
+        print("vcct/ 已存在：本脚本是一次性迁移工具，重跑会覆盖手写改动。\n"
+              "如确需重跑：git checkout <迁移前提交> -- vc_cheat_typer.py && python tools/split_1_7.py --force",
+              file=sys.stderr)
+        return 2
+
     with open(SRC, encoding="utf-8") as fh:
         text = fh.read()
     lines = text.splitlines(keepends=True)
