@@ -57,7 +57,8 @@ from vcct.winapi import (  # noqa: F401
     MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_BY_NAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, ImeGuard, _key_item, _send, add_window_exstyle, enable_dpi_awareness,
     find_game_window, force_foreground, foreground_info, get_window_exstyle, imm32,
-    is_key_down, kernel32, press_key, raw_char_probe, ui_scale, user32,
+    is_key_down, kernel32, press_key, raw_char_probe, release_modifiers, send_key,
+    ui_scale, user32, vk_for_char,
 )
 from vcct.hotkeys import (  # noqa: F401
     HotkeyEngine, build_bindings, candidate_combos, combo_signature, format_combo,
@@ -71,6 +72,7 @@ from vcct.store import (  # noqa: F401
 from vcct.loggingx import (  # noqa: F401
     append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
 )
+from vcct.sender import SendCancelled, SendError, SendParams, type_text
 
 
 # ----------------------------------------------------------------------------
@@ -351,6 +353,9 @@ class CheatApp:
         self.conflicts: dict[str, str] = {}
         self.hotkey_owner: dict[int, str] = {}
         self.sending = threading.Lock()
+        self._stop = threading.Event()   # 置位即停：用户点停止 / 暂停 / 关闭程序
+        self._inflight = ""              # 正在发送的秘籍 id（空 = 空闲）
+        self._last_send: dict[str, float] = {}   # 去抖：秘籍 id -> 上次发送时刻
         self.test_hwnd = 0
         self.game_info: tuple[int, str, str] = (0, "", "")
         self._toast: tk.Toplevel | None = None
@@ -570,8 +575,9 @@ class CheatApp:
         # 操作区
         ops = ttk.Frame(outer)
         ops.pack(fill="x", pady=(10, 0))
-        ttk.Button(ops, text="▶ 发送所选 (Enter)", style="Accent.TButton",
-                   command=self.send_selected).pack(side="left")
+        self.btn_send = ttk.Button(ops, text="▶ 发送所选 (Enter)", style="Accent.TButton",
+                                   command=self.on_send_button)
+        self.btn_send.pack(side="left")
         ttk.Button(ops, text="添加", command=self.add_cheat).pack(side="left", padx=(8, 0))
         ttk.Button(ops, text="编辑", command=self.edit_selected).pack(side="left", padx=(6, 0))
         ttk.Button(ops, text="删除", command=self.delete_selected).pack(side="left", padx=(6, 0))
@@ -600,7 +606,7 @@ class CheatApp:
         # 全局快捷键（界面内）：搜索 / 撤销 / 清空搜索
         self.root.bind("<Control-f>", lambda e: self._focus_search())
         self.root.bind("<Control-z>", lambda e: self.undo_last())
-        self.root.bind("<Escape>", lambda e: self.clear_search())
+        self.root.bind("<Escape>", lambda e: self._on_escape())
 
     def _focus_search(self):
         self.ent_search.focus_set()
@@ -635,6 +641,11 @@ class CheatApp:
                     self._on_probe_done(item[1], item[2], item[3])
                 elif kind == "hotkey":
                     self._on_hotkey(item[1])
+                elif kind == "send_done":
+                    # 只在没有新发送接管时才恢复按钮，避免"旧任务结束把新任务按钮改回去"
+                    if self._inflight == item[1]:
+                        self._inflight = ""
+                        self._set_sending_ui(False)
                 elif kind == "hotkeys":
                     self._on_hotkeys_applied(item[1], item[2])
         except queue.Empty:
@@ -984,6 +995,10 @@ class CheatApp:
     def toggle_pause(self):
         self.paused = not self.paused
         self._update_pause_ui()
+        if self.paused:
+            # 暂停 = 立刻停手：先中止在飞发送，再注销热键。
+            # 1.6 只注销热键，正在打的那条会继续打完——"暂停"语义不成立。
+            self._stop.set()
         self.apply_hotkeys()
         combo = self.settings.get("pause_hotkey", "Ctrl+Alt+P")
         if self.paused:
@@ -1024,12 +1039,66 @@ class CheatApp:
             self._start_send(c, force=False, from_hotkey=False)
 
     def _start_send(self, cheat: dict, force: bool, from_hotkey: bool):
-        if not self.sending.acquire(blocking=False):
-            self.log("上一次发送还没结束，已忽略这次请求。", "warn")
+        # 去抖：同一秘籍在 debounce_ms 内连按只发一次（手抖/键盘连击不该打两遍）
+        cid = cheat.get("id", "")
+        gap_ms = _safe_int(self.settings.get("debounce_ms"), 250, 0, 2000)
+        now = time.time()
+        last = self._last_send.get(cid, 0.0)
+        if gap_ms and now - last < gap_ms / 1000.0:
+            self.log(f"↺ 忽略连击：「{cheat.get('name', '')}」{int((now - last) * 1000)}ms 内重复触发",
+                     "info")
             return
+
+        if not self.sending.acquire(blocking=False):
+            # 静默丢弃是 1.6 的坑：用户以为没反应，其实是被丢掉了。改为双通道提示。
+            msg = "上一次发送还没结束，已忽略这次请求（按 Esc 可停止正在发送的那条）。"
+            self.log(msg, "warn")
+            self.show_toast("⚠ 正在发送，已忽略本次请求", "warn")
+            return
+
+        self._last_send[cid] = now
+        self._stop.clear()
         # 注意：Tk 变量只能在主线程读，这里先取好参数再交给工作线程
         params = self._read_params(force)
-        threading.Thread(target=self._send_worker, args=(cheat, params), daemon=True).start()
+        self._inflight = cid
+        self._set_sending_ui(True)
+        try:
+            threading.Thread(target=self._send_worker, args=(cheat, params), daemon=True).start()
+        except Exception as exc:
+            # 线程没起来必须还锁，否则此后所有发送都会静默丢弃
+            self.sending.release()
+            self._inflight = ""
+            self._set_sending_ui(False)
+            self.log(f"✖ 无法启动发送线程：{exc}", "warn")
+
+    def on_send_button(self):
+        """发送中按钮变成「停止」，同一位置切换，不新增控件（工具栏宽度很紧）。"""
+        if self._inflight or self.sending.locked():
+            self.stop_send()
+        else:
+            self.send_selected()
+
+    def stop_send(self):
+        if not (self._inflight or self.sending.locked()):
+            return
+        self._stop.set()
+        self.log("⏹ 正在停止发送…", "warn")
+
+    def _on_escape(self):
+        """Esc 优先用于停发送；没有发送时才清空搜索（1.6 的行为保留）。"""
+        if self._inflight or self.sending.locked():
+            self.stop_send()
+            return
+        self.clear_search()
+
+    def _set_sending_ui(self, active: bool):
+        try:
+            if active:
+                self.btn_send.configure(text="■ 停止 (Esc)", style="Danger.TButton")
+            else:
+                self.btn_send.configure(text="▶ 发送所选 (Enter)", style="Accent.TButton")
+        except Exception:
+            pass
 
     def _read_params(self, force: bool) -> dict:
         target_hwnd = user32.GetForegroundWindow() or 0
@@ -1045,66 +1114,81 @@ class CheatApp:
         }
 
     def _send_worker(self, cheat: dict, params: dict):
-        try:
-            code = cheat.get("code", "")
-            pre = params["pre"]
-            # 单条覆盖优先（1.6）：0 = 跟随全局
-            interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
-            hold = min(max(8, interval // 2), 60)
-            check_fg = params["check_fg"]
+        """工作线程：只负责校验 + IME 守卫 + 调用发送引擎 + 上报结果。
 
+        真正的按键循环在 `vcct.sender.type_text`（可单测、可中断）。
+        本函数绝不碰 Tk 控件——结果一律走 events 队列回主线程。
+        """
+        code = cheat.get("code", "")
+        name = cheat.get("name", code)
+        cid = cheat.get("id", "")
+        total = len(code)
+        check_fg = params["check_fg"]
+        # 单条覆盖优先（1.6）：0 = 跟随全局
+        interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
+        sp = SendParams.for_code(code, interval, params["pre"], params["uppercase"])
+        t0 = time.perf_counter()
+        try:
             if check_fg and not self._fg_ok(params["keywords"]):
                 title, _ = foreground_info()
                 msg = (f"⚠ 前台窗口不是目标游戏（当前：{title or '未知'}），本次未发送。"
                        f"点「拾取当前窗口」或关闭前台校验。")
                 self.log(msg, "warn", from_thread=True)
                 self.events.put(("toast", f"⚠ 未在前台：{title or '未知窗口'}", "warn"))
+                append_log(f"SEND fail code={code} reason=not_foreground title={title!r}", "WARN")
                 return
 
             target_hwnd = user32.GetForegroundWindow() or 0
 
             if params["release_mods"]:
-                for vk in (0xA2, 0xA3, 0xA0, 0xA1, 0x5B, 0x5C):  # Ctrl/Shift/Win：先松手，免得变速跑
-                    try:
-                        _send([_key_item(vk, True)])
-                    except OSError:
-                        pass
-            time.sleep(pre / 1000.0)
+                release_modifiers()
 
-            upper = params["uppercase"]
-            ime = ImeGuard(target_hwnd, params["disable_ime"])
-            with ime:
-                if upper:
-                    _send([_key_item(0xA0, False)])  # LShift 按下
-                try:
-                    for ch in code:
-                        if check_fg and user32.GetForegroundWindow() != target_hwnd:
-                            msg = "⚠ 目标窗口失去焦点，已中止输入。"
-                            self.log(msg, "warn", from_thread=True)
-                            self.events.put(("toast", "⚠ 已中止：游戏失去焦点", "warn"))
-                            return
-                        vk = VK_BY_NAME.get(ch.lower())
-                        if vk is None:
-                            msg = f"⚠ 代码里有无法输入的字符：「{ch}」，已中止。"
-                            self.log(msg, "warn", from_thread=True)
-                            self.events.put(("toast", f"⚠ 代码含非法字符 {ch!r}", "warn"))
-                            return
-                        press_key(vk, hold)
-                        time.sleep(max(0, interval - hold) / 1000.0)
-                finally:
-                    if upper:
-                        _send([_key_item(0xA0, True)])
+            with ImeGuard(target_hwnd, params["disable_ime"]):
+                sent = type_text(
+                    sp, self._stop,
+                    send_key=send_key, sleep=time.sleep, lookup_vk=vk_for_char,
+                    check_target=(lambda: user32.GetForegroundWindow() == target_hwnd)
+                    if check_fg else None,
+                )
 
-            self.log(f"✔ 已输入「{cheat['name']}」 {code}", "ok", from_thread=True)
-            self.events.put(("toast", f"✔ {cheat['name']} · {code}", "ok"))
-            self.events.put(("stats", cheat.get("id", ""), code))
+            elapsed = time.perf_counter() - t0
+            self._log_send_quality(code, sent, total, sp, elapsed)
+            self.log(f"✔ 已输入「{name}」 {code}", "ok", from_thread=True)
+            self.events.put(("toast", f"✔ {name} · {code}", "ok"))
+            self.events.put(("stats", cid, code))
+        except SendCancelled as exc:
+            elapsed = time.perf_counter() - t0
+            self.log(f"⏹ 已停止「{name}」：发到第 {exc.sent}/{exc.total} 个字符。", "warn",
+                     from_thread=True)
+            self.events.put(("toast", f"⏹ 已停止 {exc.sent}/{exc.total}", "warn"))
+            append_log(f"SEND cancel code={code} sent={exc.sent}/{exc.total} "
+                       f"elapsed={elapsed:.3f}s", "WARN")
+        except SendError as exc:
+            self.log(f"⚠ {exc.reason}（已发 {exc.sent}/{exc.total}）", "warn", from_thread=True)
+            self.events.put(("toast", f"⚠ {exc.reason}", "warn"))
+            append_log(f"SEND fail code={code} reason={exc.reason} "
+                       f"sent={exc.sent}/{exc.total}", "WARN")
         except OSError as exc:
             self.log(f"✖ 键盘注入失败：{exc}（若游戏以管理员运行，请同样以管理员运行本工具）",
                      "warn", from_thread=True)
+            append_log(f"SEND fail code={code} reason=oserror {exc}", "WARN")
         except Exception as exc:
             self.log(f"✖ 发送异常：{exc}", "warn", from_thread=True)
+            append_log(f"SEND fail code={code} reason=exception {exc}", "WARN")
         finally:
+            self.events.put(("send_done", cid))
             self.sending.release()
+
+    @staticmethod
+    def _log_send_quality(code: str, sent: int, total: int, sp: SendParams, elapsed: float):
+        """记录计划时长与实际时长；偏差过大说明节奏被系统拖慢（游戏卡 / CPU 忙）。"""
+        planned = (sp.pre_delay_ms + total * sp.interval_ms) / 1000.0
+        dev = (elapsed - planned) / planned if planned > 0 else 0.0
+        append_log(f"SEND ok code={code} sent={sent}/{total} planned={planned:.3f}s "
+                   f"actual={elapsed:.3f}s dev={dev:+.0%}")
+        if abs(dev) > 0.15:
+            append_log(f"SEND WARN 节奏偏差 {dev:+.0%}（计划 {planned:.3f}s / "
+                       f"实际 {elapsed:.3f}s），若出现丢字请调大间隔", "WARN")
 
     # -- 增删改 -------------------------------------------------------------
     def add_cheat(self):
@@ -1513,6 +1597,16 @@ class CheatApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def on_close(self):
+        # 先停发送：不能让线程在窗口销毁后还往系统里注入按键
+        self._stop.set()
+        if self.sending.locked():
+            deadline = time.time() + 0.3     # 20ms 切片下 300ms 足够走完一次取消
+            while self.sending.locked() and time.time() < deadline:
+                time.sleep(0.02)
+        try:
+            release_modifiers()               # 兜底松开修饰键：关掉程序也要能正常走路
+        except Exception:
+            pass
         try:
             self.settings["target_keywords"] = self.var_kw.get().strip()
             self.settings["require_foreground"] = bool(self.var_fg.get())

@@ -26,6 +26,7 @@ DEFAULT_SETTINGS = {
     "disable_ime": True,      # 发送期间临时摘掉目标窗口的输入法关联（绕开中文 IME 吞字）
     "show_toast": True,       # 游戏内悬浮提示（不抢焦点）
     "pause_hotkey": "Ctrl+Alt+P",  # 全局暂停：一键关掉全部秘籍热键（防止在别的窗口误触）
+    "debounce_ms": 250,       # 同一秘籍连按去抖（手抖连按两下不该打两遍）
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢

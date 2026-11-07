@@ -256,11 +256,41 @@ def _send(items: list[INPUT]) -> None:
         raise OSError(ctypes.get_last_error(), "SendInput 被拒绝（可能目标程序权限更高）")
 
 
+def send_key(vk: int, keyup: bool) -> None:
+    """单键按下/抬起原语（供发送引擎注入，一次 SendInput 只发一个键）。"""
+    _send([_key_item(vk, keyup)])
+
+
+# 需要兜底松开的修饰键：左右 Ctrl / 左右 Shift / 左右 Win
+RELEASE_VKS = (0xA2, 0xA3, 0xA0, 0xA1, 0x5B, 0x5C)
+
+
+def release_modifiers() -> None:
+    """兜底松开所有修饰键。
+
+    用在两处：发送前（用户可能正按着 Ctrl 触发热键，不松开就变成"变速跑"）、
+    退出前（异常/强杀后残留的按下状态会让角色一直跑，必须清干净）。
+    """
+    for vk in RELEASE_VKS:
+        try:
+            send_key(vk, True)
+        except OSError:
+            pass
+
+
+def vk_for_char(ch: str) -> int | None:
+    """字符 -> 虚拟键码；None 表示本工具无法输入该字符。"""
+    return VK_BY_NAME.get(str(ch).lower())
+
+
 def press_key(vk: int, hold_ms: int) -> None:
     """按下 -> 保持 -> 抬起。保持时间是关键：游戏按帧轮询，同帧内下抬会被漏掉。"""
-    _send([_key_item(vk, False)])
-    time.sleep(max(0, hold_ms) / 1000.0)
-    _send([_key_item(vk, True)])
+    send_key(vk, False)
+    try:
+        time.sleep(max(0, hold_ms) / 1000.0)
+    finally:
+        # 抬起放 finally：中途异常/被取消时绝不留残键（角色一直跑很难受）
+        send_key(vk, True)
 
 
 def foreground_info() -> tuple[str, str]:
