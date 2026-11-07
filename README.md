@@ -204,6 +204,7 @@ vc-cheats/
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
 ├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
 ├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
+├── docs/MACOS-PORT.md    macOS 平台支持方案（需求 1.6）
 ├── pyproject.toml     开发期工具配置（ruff；运行时不需要）
 ├── tests/             回归测试集（python -m unittest discover -s tests）
 └── README.md          本文件
