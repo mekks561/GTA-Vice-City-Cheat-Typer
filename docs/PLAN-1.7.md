@@ -7,9 +7,10 @@
 **执行状态（随进度更新）**
 
 - ✅ T-01 ~ T-03：2026-11-07 交付，commit `d083a81`。主文件 2900 → 1709 行；新增 `vcct/` 六个模块（const / winapi / hotkeys / store / loggingx / sender 骨架）；单测 45 → **52** 条；ruff 0 告警；`--selftest` 6 项全过；异目录启动正常。
-- ⬜ T-04 ~ T-06（P0 功能）：待开工
-- ⬜ T-07 ~ T-09（P1）：待开工
-- ⬜ T-10 发布：待开工
+- ✅ T-04：2026-11-07 交付，commit `3bfecaf`。`type_text` + `SendCancelled`/`SendError(ValueError)`/`for_code`；六条约定各有单测；单测 52 → **71** 条。
+- ✅ T-05 ~ T-08：2026-11-07 交付，commit `2a52449`。停止按钮/Esc 状态机、暂停中止在飞、残键兜底（finally + release_modifiers）、去抖 250ms、SEND 质量日志、线程启动失败归还锁；`build/gui_test_1_7.py` 15 项接线测试全过；GUI 冒烟进单测（无图形环境自动跳过）；单测 → **72** 条。
+- 📝 T-09 调整：单测已 72 条（≥55 达标）；**selftest 不再加纯逻辑项**——selftest 的价值是端到端诊断真机环境，取消逻辑已被 19 条假函数单测覆盖，往 selftest 里塞一遍重复断言只增加运行时长。此项按原目标（覆盖到位）视为达成。
+- ✅ T-10：2026-11-07 交付。APP_VER 1.7、README v1.7 章节、打包 + SHA256 + Release。
 
 ---
 
