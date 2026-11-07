@@ -60,6 +60,9 @@ from vcct.winapi import (  # noqa: F401
     is_key_down, kernel32, press_key, raw_char_probe, release_modifiers, send_key,
     ui_scale, user32, vk_for_char,
 )
+from vcct.winapi import (  # noqa: F401
+    process_elevated, self_elevated, shell_execute_runas, window_pid,
+)
 from vcct.hotkeys import (  # noqa: F401
     HotkeyEngine, build_bindings, candidate_combos, combo_signature, format_combo,
     is_safe_binding, parse_combo, pick_free_combo,
@@ -358,12 +361,16 @@ class CheatApp:
         self._last_send: dict[str, float] = {}   # 去抖：秘籍 id -> 上次发送时刻
         self.test_hwnd = 0
         self.game_info: tuple[int, str, str] = (0, "", "")
+        self.game_is_admin: bool | None = None    # 游戏进程是否管理员运行
+        self.is_admin = self_elevated()           # 本工具是否管理员运行
         self._toast: tk.Toplevel | None = None
         self.last_error = ""
         self.paused = False              # 暂停状态不持久化：重启即恢复工作（安全侧）
         self._undo: dict | None = None   # 仅保留最近一步删除
         self._avoid: set[str] = set()    # 注册时报"已被占用"的键，自动分配时跳过
         self._auto_fix: dict | None = None
+        self._last_foreign: tuple[int, str, str] = (0, "", "")   # 最近一个非本工具的前台窗口
+        self._kw_fixed = self._heal_target_keywords()
 
         self._setup_style()
         self._build_ui()
@@ -372,10 +379,15 @@ class CheatApp:
         self.engine = HotkeyEngine(self.events)
         self.apply_hotkeys()
         self.root.after(40, self._pump)
+        self.root.after(500, self._poll_foreign_foreground)
         self.root.after(1500, self._update_game_status)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         append_log(f"启动 {APP_NAME} v{APP_VER}；配置文件 {data_path()}；日志 {log_file()}")
+        append_log(f"权限：本工具{'已' if self.is_admin else '未'}提权")
+        if self._kw_fixed:
+            self.log("目标窗口关键字原本指向本工具自身，已重置为「Vice City」。"
+                     "正确做法：切到游戏停 1 秒，再点「拾取当前窗口」。", "warn")
         if self.load_warning:
             self.log("⚠ " + self.load_warning, "warn")
             self.root.after(300, lambda: messagebox.showwarning(
@@ -440,6 +452,9 @@ class CheatApp:
         self.lbl_state.pack(side="right", pady=(6, 0), padx=(0, 12))
         self.lbl_game = ttk.Label(head, text="⚪ 检测游戏…", style="Muted.TLabel")
         self.lbl_game.pack(side="right", pady=(6, 0), padx=(0, 16))
+        # 权限不匹配时才出现：UIPI 会静默拦掉注入，必须给一个一键修复的入口
+        self.btn_admin = ttk.Button(head, text="⚠ 以管理员身份重启", style="Danger.TButton",
+                                    command=self.relaunch_as_admin)
 
         # 工具条
         bar = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
@@ -531,6 +546,9 @@ class CheatApp:
         more.add_separator()
         more.add_command(label="从上一版备份恢复", command=self.restore_backup)
         more.add_command(label="打开日志目录", command=self.open_log)
+        more.add_separator()
+        more.add_command(label="环境诊断（检查权限 / 前台 / 注入）", command=self.run_diagnose)
+        more.add_command(label="以管理员身份重启", command=self.relaunch_as_admin)
         more.add_separator()
         more.add_command(label="清空使用统计", command=self.clear_stats)
         mb.configure(menu=more)
@@ -639,6 +657,8 @@ class CheatApp:
                     self._bump_stats(item[1], item[2])
                 elif kind == "probe_done":
                     self._on_probe_done(item[1], item[2], item[3])
+                elif kind == "diag_done":
+                    self._show_diag(item[1])
                 elif kind == "hotkey":
                     self._on_hotkey(item[1])
                 elif kind == "send_done":
@@ -666,13 +686,78 @@ class CheatApp:
         try:
             self.game_info = find_game_window()
             hwnd, _title, exe = self.game_info
-            if hwnd:
+            self.game_is_admin = process_elevated(window_pid(hwnd)) if hwnd else None
+            if hwnd and self.permission_blocks_input():
+                self.lbl_game.configure(
+                    text=f"🔴 游戏以管理员运行 → 按键会被拦截（{exe or '未知进程'}）",
+                    foreground=C["warn"])
+                self._show_admin_button(True)
+            elif hwnd:
                 self.lbl_game.configure(text=f"🟢 游戏运行中：{exe or '未知进程'}", foreground=C["ok"])
+                self._show_admin_button(False)
             else:
                 self.lbl_game.configure(text="⚪ 未检测到游戏", foreground=C["muted"])
+                self._show_admin_button(False)
         except Exception:
             pass
         self.root.after(3000, self._update_game_status)
+
+    def permission_blocks_input(self) -> bool:
+        """游戏以管理员运行而本工具不是 → UIPI 会静默丢弃注入，发送必然无效。"""
+        return bool(self.game_is_admin) and not self.is_admin
+
+    def _permission_mismatch_live(self) -> bool:
+        """发送前实时复核一次（UI 里的 game_is_admin 可能已过期 3 秒）。"""
+        if self.is_admin:
+            return False
+        hwnd = self.game_info[0]
+        if not hwnd:
+            return False
+        val = process_elevated(window_pid(hwnd))
+        if val is not None:
+            self.game_is_admin = val
+        return bool(val)
+
+    def _heal_target_keywords(self) -> bool:
+        """目标关键字指向本工具自己是配置错误——前台校验永远不会通过。
+
+        这是「拾取当前窗口」的经典误操作（点按钮时前台就是本工具）。
+        直接重置为默认值，否则用户会一直以为"游戏没反应"。
+        """
+        kw = str(self.settings.get("target_keywords") or "").strip()
+        if kw and APP_NAME.lower() in kw.lower():
+            self.settings["target_keywords"] = DEFAULT_SETTINGS["target_keywords"]
+            return True
+        return False
+
+    def _show_admin_button(self, show: bool):
+        try:
+            if show and not self.btn_admin.winfo_ismapped():
+                # before= 让按钮在 pack 顺序里排在状态文字之前：
+                # 否则头部空间不足时，后 pack 的按钮会被压成 0 宽（这次踩到了）
+                self.btn_admin.pack(side="right", pady=(2, 0), padx=(0, 8), before=self.lbl_game)
+            elif not show and self.btn_admin.winfo_ismapped():
+                self.btn_admin.pack_forget()
+        except Exception:
+            pass
+
+    def relaunch_as_admin(self):
+        """以管理员身份重启自身（会弹 UAC）。"""
+        try:
+            if getattr(sys, "frozen", False):
+                exe, params = sys.executable, ""
+            else:
+                exe = sys.executable
+                params = " ".join(f'"{a}"' for a in [os.path.abspath(sys.argv[0]), *sys.argv[1:]])
+            rc = shell_execute_runas(exe, params, os.getcwd())
+            if rc > 32:
+                append_log("请求以管理员身份重启（UAC）")
+                self.on_close()
+            else:
+                messagebox.showwarning("提权失败", f"无法以管理员身份重启（代码 {rc}）。\n"
+                                       f"可手动右键 exe →「以管理员身份运行」。", parent=self.root)
+        except Exception as exc:
+            messagebox.showerror("提权失败", str(exc), parent=self.root)
 
     def show_toast(self, text: str, kind: str = "ok"):
         """游戏内悬浮提示：无边框置顶 + NOACTIVATE，绝不抢走游戏焦点"""
@@ -1129,9 +1214,21 @@ class CheatApp:
         sp = SendParams.for_code(code, interval, params["pre"], params["uppercase"])
         t0 = time.perf_counter()
         try:
+            # 权限不匹配时 SendInput 会"成功但不生效"，是最难自查的失败模式：必须提前拦下并说明
+            if self._permission_mismatch_live():
+                msg = ("⚠ 游戏以管理员身份运行，本工具不是：Windows 会**静默丢弃**注入的按键"
+                       "（SendInput 仍报成功，所以看起来毫无反应）。"
+                       "请点右上角「以管理员身份重启」，或右键 exe →「以管理员身份运行」。")
+                self.log(msg, "warn", from_thread=True)
+                self.events.put(("toast", "⚠ 权限不匹配：请以管理员身份重启工具", "warn"))
+                append_log(f"SEND fail code={code} reason=uipi_blocked "
+                           f"game_admin=1 self_admin=0", "WARN")
+                return
+
             if check_fg and not self._fg_ok(params["keywords"]):
                 title, _ = foreground_info()
-                msg = (f"⚠ 前台窗口不是目标游戏（当前：{title or '未知'}），本次未发送。"
+                msg = (f"⚠ 前台窗口不是目标游戏（当前：{title or '未知'}；"
+                       f"目标关键字：{'、'.join(params['keywords']) or '未设置'}），本次未发送。"
                        f"点「拾取当前窗口」或关闭前台校验。")
                 self.log(msg, "warn", from_thread=True)
                 self.events.put(("toast", f"⚠ 未在前台：{title or '未知窗口'}", "warn"))
@@ -1576,14 +1673,47 @@ class CheatApp:
                  f"当前「{self.active_profile}」{len(self.cheats)} 条）。", "ok")
 
     def pick_window(self):
-        title, exe = foreground_info()
-        if not title and not exe:
-            messagebox.showinfo("拾取失败", "没有取到前台窗口，请先切到游戏窗口再点。", parent=self.root)
+        """拾取目标窗口。
+
+        注意：点这个按钮的一瞬间，前台必然是**本工具自己**（按钮被点击就会激活窗口），
+        所以不能用"当前前台"——那样永远拾到自己，前台校验必然失败。
+        改为：优先用进程检测到的游戏窗口，其次用后台轮询记住的"最近一个非本工具前台窗口"。
+        """
+        hwnd, title, exe = self.game_info
+        if not hwnd:
+            hwnd, title, exe = self._last_foreign
+        if not hwnd:
+            messagebox.showinfo(
+                "拾取失败",
+                "还没有记录到游戏窗口。\n\n请先切到游戏窗口停留一两秒，再回来点这个按钮。",
+                parent=self.root)
+            return
+        if self._is_own_window(hwnd):
+            messagebox.showinfo("拾取失败", "取到的是本工具自己的窗口，请先切到游戏再试。",
+                                parent=self.root)
             return
         kw = title if title else os.path.splitext(exe)[0]
         self.var_kw.set(kw)
         self._on_setting_change()
         self.log(f"目标窗口设为：{kw}（进程 {exe or '未知'}）", "ok")
+
+    def _is_own_window(self, hwnd: int) -> bool:
+        try:
+            return bool(hwnd) and hwnd == user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+        except Exception:
+            return False
+
+    def _poll_foreign_foreground(self):
+        """后台记录"最近一个不是本工具的前台窗口"，供「拾取当前窗口」使用。"""
+        try:
+            fg = user32.GetForegroundWindow() or 0
+            if fg and not self._is_own_window(fg):
+                title, exe = foreground_info()
+                if title or exe:
+                    self._last_foreign = (fg, title, exe)
+        except Exception:
+            pass
+        self.root.after(500, self._poll_foreign_foreground)
 
     def open_test_window(self):
         """注入自检：隐藏原生 Win32 窗口上跑一遍完整注入链路，结果弹窗展示"""
@@ -1595,6 +1725,30 @@ class CheatApp:
             self.events.put(("probe_done", ok, got_fg, got))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def run_diagnose(self):
+        """环境诊断：权限 / 前台 / 注入逐环节检查，结果弹窗展示。"""
+        self.log("环境诊断运行中：会短暂弹出一个 1 秒的自检小窗…", "info")
+
+        def worker():
+            try:
+                text = "\n".join(diagnose_report(include_probe=True))
+                self.events.put(("diag_done", text))
+            except Exception as exc:
+                self.events.put(("diag_done", f"诊断失败：{exc}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_diag(self, text: str):
+        win = tk.Toplevel(self.root)
+        win.title("环境诊断")
+        win.geometry("760x520")
+        txt = tk.Text(win, wrap="word", font=("Consolas", 10), padx=10, pady=8,
+                      bg="#f8fafc", relief="flat")
+        txt.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+        txt.insert("1.0", text)
+        txt.configure(state="disabled")
+        ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(4, 10))
 
     def on_close(self):
         # 先停发送：不能让线程在窗口销毁后还往系统里注入按键
@@ -1765,10 +1919,82 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def diagnose_report(include_probe: bool = True) -> list[str]:
+    """生成环境诊断报告（纯文本行，供 CLI 打印或 GUI 弹窗展示）。
+
+    典型用途：游戏不响应时先看这份报告——权限、前台、热键、注入逐环节定位。
+    """
+    out: list[str] = []
+
+    def add(key: str, value) -> None:
+        out.append(f"{key:<14}{value}")
+
+    add("版本", f"{APP_NAME} v{APP_VER}")
+    try:
+        ver = sys.getwindowsversion()
+        add("系统", f"Windows {ver.major}.{ver.minor} build {ver.build}")
+    except Exception:
+        add("系统", "未知")
+    add("本工具", f"管理员={self_elevated()}　pid={os.getpid()}")
+    add("配置", data_path())
+    add("日志", log_file())
+
+    hwnd, title, exe = find_game_window()
+    pid = window_pid(hwnd) if hwnd else 0
+    if hwnd:
+        add("游戏窗口", f"{title!r} / {exe or '未知'} / hwnd={hwnd}")
+        add("游戏进程", f"pid={pid}　管理员={process_elevated(pid)}")
+        try:
+            add("窗口状态", f"可见={bool(user32.IsWindowVisible(hwnd))}　"
+                            f"最小化={bool(user32.IsIconic(hwnd))}")
+        except Exception:
+            pass
+    else:
+        add("游戏窗口", "未检测到（进程名需包含 gta-vc / vice）")
+
+    fg_title, fg_exe = foreground_info()
+    add("当前前台", f"{fg_title!r} / {fg_exe or '未知'}")
+
+    settings = load_store()["settings"]
+    kws = [k.strip().lower() for k in str(settings.get("target_keywords") or "").split(",") if k.strip()]
+    add("目标关键字", "、".join(kws) or "未设置")
+    if kws:
+        hay = f"{fg_title} {fg_exe}".lower()
+        add("前台是否匹配", any(k in hay for k in kws) or (bool(hwnd) and hwnd == user32.GetForegroundWindow()))
+
+    # 关键结论：UIPI 静默拦截
+    game_admin = process_elevated(pid) if pid else None
+    me_admin = self_elevated()
+    if game_admin and not me_admin:
+        out.append("")
+        out.append("⚠ 结论：游戏以管理员运行，本工具不是。")
+        out.append("  Windows 的 UIPI 会静默丢弃注入的按键（SendInput 仍返回成功），")
+        out.append("  表现就是「按了完全没反应、日志里也没有错误」。")
+        out.append("  修复：右键 exe →「以管理员身份运行」（或用界面右上角的一键重启按钮）。")
+
+    if include_probe:
+        out.append("")
+        out.append("注入探针（会抢前台约 1 秒）…")
+        try:
+            got_fg, got = raw_char_probe("VCCT")
+            add("探针结果", f"取得前台={got_fg}　收到={got!r}（期望 'VCCT' 或不区分大小写）")
+        except Exception as exc:
+            add("探针结果", f"失败：{exc}")
+    return out
+
+
+def diagnose() -> int:
+    """CLI 一键体检。会短暂抢占前台约 1 秒（注入探针需要一个真实窗口接收字符）。"""
+    print("\n".join(diagnose_report()))
+    return 0
+
+
 def main() -> int:
     if not IS_WIN:
         print("本工具仅支持 Windows。")
         return 1
+    if "--diagnose" in sys.argv:
+        return diagnose()
     if "--selftest" in sys.argv:
         return selftest()
 

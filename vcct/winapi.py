@@ -563,3 +563,72 @@ def ui_scale(root) -> float:
         return max(1.0, min(2.0, root.winfo_fpixels("1i") / 96.0))
     except Exception:
         return 1.0
+
+
+# ----------------------------------------------------------------------------
+# 权限（1.7.1）：UIPI 会静默丢弃跨完整性级别的注入
+# ----------------------------------------------------------------------------
+# 事实：从非管理员进程向管理员进程 SendInput，Windows 的 UIPI 会拦掉这次注入，
+# 但 **SendInput 仍返回成功**，GetLastError 也不会说是被拦——用户看到的就是
+# "按了没反应，日志里也没有错误"。所以必须在发送前主动比对两边的权限级别。
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_TOKEN_QUERY = 0x0008
+_TokenElevation = 20
+
+
+def window_pid(hwnd: int) -> int:
+    """窗口所属进程 PID；失败返回 0。"""
+    try:
+        pid = wt.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return int(pid.value)
+    except Exception:
+        return 0
+
+
+def process_elevated(pid: int) -> bool | None:
+    """进程是否以管理员（高完整性）运行；无法判断时返回 None。
+
+    返回 None 与 False 必须区分：None 表示"查不到"，不应据此拦截发送。
+    """
+    if not pid or not IS_WIN:
+        return None
+    try:
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        h = k32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not h:
+            return None
+        try:
+            tok = wt.HANDLE()
+            if not adv.OpenProcessToken(h, _TOKEN_QUERY, ctypes.byref(tok)):
+                return None
+            try:
+                val = ctypes.c_int(0)
+                ret = wt.DWORD(0)
+                ok = adv.GetTokenInformation(tok, _TokenElevation, ctypes.byref(val),
+                                             ctypes.sizeof(val), ctypes.byref(ret))
+                return bool(val.value) if ok else None
+            finally:
+                k32.CloseHandle(tok)
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return None
+
+
+def self_elevated() -> bool:
+    """本进程是否以管理员运行。"""
+    try:
+        return bool(process_elevated(ctypes.windll.kernel32.GetCurrentProcessId()))
+    except Exception:
+        return False
+
+
+def shell_execute_runas(path: str, params: str = "", cwd: str = "") -> int:
+    """以管理员身份重启自身（UAC 提权）。返回 ShellExecute 的返回值，>32 表示成功。"""
+    try:
+        return int(ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", path, params or None, cwd or None, 1))
+    except Exception:
+        return 0
