@@ -254,6 +254,18 @@ def _norm_packs(raw) -> list[dict]:
     return out
 
 
+def _norm_targets(raw) -> list[dict]:
+    """2.0 目标规则（惰性导入，避开 core.__init__ ↔ store 的循环依赖）。"""
+    from .core.targets import normalize_targets
+    return normalize_targets(raw)
+
+
+def _norm_strategies(raw) -> dict:
+    """2.0 具名发送策略表（同上）。"""
+    from .core.strategy import normalize_strategies
+    return normalize_strategies(raw)
+
+
 def _norm_history(raw, limit: int = 50) -> list[dict]:
     """1.8-I 发送历史（最多 50 条，最新在前）。脏记录逐条丢弃。"""
     out: list[dict] = []
@@ -378,6 +390,8 @@ def normalize_store(raw: dict) -> dict:
         "packs": _norm_packs(migrated.get("packs")),   # 1.9：已安装秘籍包记录
         "ui": _norm_ui(migrated.get("ui")),           # 1.9：窗口位置 / 列宽
         "history": _norm_history(migrated.get("history")),  # 1.8-I：最近 50 次发送
+        "targets": _norm_targets(migrated.get("targets")),  # 2.0：目标应用规则
+        "strategies": _norm_strategies(migrated.get("strategies")),  # 2.0：具名发送策略
     }
 
 
@@ -394,6 +408,8 @@ def default_store() -> dict:
         "packs": [],
         "ui": {},
         "history": [],
+        "targets": [],
+        "strategies": {},
     }
 
 
@@ -497,6 +513,8 @@ def save_store(store: dict, path: str | None = None) -> None:
         "packs": _norm_packs(store.get("packs")),
         "ui": _norm_ui(store.get("ui")),
         "history": _norm_history(store.get("history")),
+        "targets": _norm_targets(store.get("targets")),
+        "strategies": _norm_strategies(store.get("strategies")),
     }
     tmp = path + ".tmp"
     try:
@@ -529,6 +547,8 @@ def bundle_payload(store: dict) -> dict:
         "packs": _norm_packs(store.get("packs")),
         "ui": _norm_ui(store.get("ui")),
         "history": _norm_history(store.get("history")),
+        "targets": _norm_targets(store.get("targets")),
+        "strategies": _norm_strategies(store.get("strategies")),
     }
 
 

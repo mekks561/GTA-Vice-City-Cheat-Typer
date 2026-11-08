@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "1.9.1"
+APP_VER = "2.0.0"
 IS_WIN = os.name == "nt"
 
 
@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     "close_to_tray": True,    # 关闭窗口 = 最小化到托盘；False = 关闭即退出（1.7 及以前的行为）
     "auto_switch": True,      # 按游戏自动切方案总开关（games 规则表逐条还有自己的 enabled）
     "onboarded": False,       # 首次启动向导是否已完成/跳过
+    # --- 2.0 新增（可选，缺省 = 旧行为） ---
+    "hooks_enabled": False,   # 扩展点（前置/后置钩子）总开关，默认关闭
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢

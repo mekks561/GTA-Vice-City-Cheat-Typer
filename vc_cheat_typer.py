@@ -80,6 +80,14 @@ from vcct.importer import parse_pasted  # noqa: F401
 from vcct.templates import (  # noqa: F401
     TEMPLATE_INFO, TEMPLATE_NAMES, template_cheats, template_preset,
 )
+# 2.0：通用输入平台能力（纯逻辑，零 tkinter）
+from vcct.core.strategy import (  # noqa: F401
+    normalize_strategy, plan_send, resolve_strategy, should_retry,
+)
+from vcct.core.targets import (  # noqa: F401
+    evaluate_targets, normalize_targets, resolve_target, targets_from_games,
+)
+from vcct.core.hooks import HookBus  # noqa: F401
 from vcct.loggingx import (  # noqa: F401
     append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
 )
@@ -473,6 +481,9 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(frm, text="按游戏自动切换方案（规则在「游戏」页配置）",
                         variable=self.app.var_auto_switch,
                         command=self.app._on_setting_change).pack(anchor="w", pady=4)
+        ttk.Checkbutton(frm, text="启用扩展点（前置/后置钩子，高级功能，默认关闭）",
+                        variable=self.app.var_hooks,
+                        command=self.app._on_setting_change).pack(anchor="w", pady=4)
 
         box = ttk.LabelFrame(frm, text=" 全局暂停热键 ", padding=12)
         box.pack(fill="x", pady=(14, 0))
@@ -586,7 +597,44 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(btns, text="编辑", command=self._edit_rule).pack(side="left", padx=(6, 0))
         ttk.Button(btns, text="删除", command=self._del_rule).pack(side="left", padx=(6, 0))
         self._reload_games()
+
+        # 2.0：通用目标规则（配置驱动，优先级高于 games）
+        tbox = ttk.LabelFrame(frm, text=" 目标规则（v2.0，配置驱动） ", padding=10)
+        tbox.pack(fill="x", pady=(10, 0))
+        self.lbl_targets = ttk.Label(tbox, text="", style="Muted.TLabel", justify="left")
+        self.lbl_targets.pack(anchor="w")
+        trow = ttk.Frame(tbox)
+        trow.pack(fill="x", pady=(6, 0))
+        ttk.Button(trow, text="从 games 规则生成 targets", command=self._migrate_targets)\
+            .pack(side="left")
+        self._reload_targets_info()
         return frm
+
+    def _reload_targets_info(self):
+        targets = self.app.store.get("targets") or []
+        self.lbl_targets.configure(
+            text=f"当前 {len(targets)} 条通用目标规则"
+                 + (f"（示例：{targets[0]['name']} → {targets[0]['match_type']}:"
+                    f"{targets[0]['pattern']}）" if targets else "")
+                 + "\n非空时优先于上方 games 规则；可带方案 / 发送策略 / IME 策略 / 前台要求。"
+                 + "\n更多字段见 docs/PACK-FORMAT.md 与 CLI：python -m vcct.cli targets")
+
+    def _migrate_targets(self):
+        app = self.app
+        converted = targets_from_games(app.store.get("games") or [])
+        if not converted:
+            messagebox.showinfo("没有可迁移的规则", "请先在上方添加 games 规则。", parent=self)
+            return
+        existing = list(app.store.get("targets") or [])
+        names = {t["name"] for t in existing}
+        added = [t for t in converted if t["name"] not in names]
+        if not added:
+            messagebox.showinfo("无需迁移", "这些 games 规则都已存在对应的目标规则。", parent=self)
+            return
+        app.store["targets"] = existing + added
+        app.persist()
+        self._reload_targets_info()
+        app.log(f"已生成 {len(added)} 条通用目标规则（targets），优先级高于 games。", "ok")
 
     def _reload_games(self):
         self.games_tree.delete(*self.games_tree.get_children())
@@ -1487,7 +1535,10 @@ class CheatApp:
         self._switch_pending = None      # 1.8 自动切方案防抖：((rule_name, profile), first_seen)
         self._switch_warned: set[str] = set()   # 规则指向不存在方案：只警告一次
         self._tray_hinted = False        # 首次最小化到托盘的提示只给一次
+        self._active_target: dict | None = None   # 2.0 当前命中的目标规则解析结果
+        self.hooks = HookBus(enabled=False)      # 2.0 扩展点，默认关闭
         self._make_vars()
+        self.hooks.enabled = bool(self.settings.get("hooks_enabled", False))
 
         self._setup_style()
         self._build_ui()
@@ -1539,6 +1590,7 @@ class CheatApp:
         self.var_toast = tk.BooleanVar(value=bool(s["show_toast"]))
         self.var_tray = tk.BooleanVar(value=bool(s.get("close_to_tray", True)))
         self.var_auto_switch = tk.BooleanVar(value=bool(s.get("auto_switch", True)))
+        self.var_hooks = tk.BooleanVar(value=bool(s.get("hooks_enabled", False)))
 
     def _on_unmap(self, _event=None):
         """用户点了任务栏/标题栏的「最小化」→ 收进托盘（withdraw 不触发本回调二次入托）。"""
@@ -1880,23 +1932,45 @@ class CheatApp:
 
     # -- 1.8 按游戏自动切方案 ---------------------------------------------------
     def _auto_switch_tick(self):
-        """3s 轮询顺带跑：前台命中 games 规则且稳定 800ms → 自动切方案。
+        """3s 轮询顺带跑：前台命中规则且稳定 800ms → 自动切方案。
 
+        2.0：优先用通用 `targets` 规则（可带方案/策略/IME 策略），没有 targets
+        时**完全沿用 1.8 的 games 行为**——缺省即旧行为，Gate G2.0 要求。
         防抖 800ms：Alt+Tab 掠过的窗口不触发；发送中不切（1.8-B 硬约束）。
         """
         try:
             if not self.settings.get("auto_switch", True):
                 return
+            targets = self.store.get("targets") or []
             games = self.store.get("games") or []
-            if not games:
+            if not targets and not games:
                 return
             if self.sending.locked() or self._inflight:
                 self._switch_pending = None
                 return
             title, exe = foreground_info()
-            rule = evaluate_game_rules(games, title, exe)
+            resolved = None
+            if targets:
+                hit = evaluate_targets(targets, title, exe)
+                if hit is None:
+                    self._switch_pending = None
+                    self._active_target = None
+                    return
+                resolved = resolve_target(hit, self.store)
+                # 兼容旧的 debounce/切换流程：统一成 {name, profile}
+                rule = {"name": hit["name"], "profile": resolved["profile"]}
+                self._active_target = resolved
+            else:
+                hit = evaluate_game_rules(games, title, exe)
+                if hit is None:
+                    self._switch_pending = None
+                    self._active_target = None
+                    return
+                rule = {"name": hit["name"], "profile": hit.get("profile", "")}
+                self._active_target = None
+
             now = time.time()
-            if rule is None or rule.get("profile") == self.active_profile:
+            if not rule["profile"] or rule["profile"] == self.active_profile:
                 self._switch_pending = None
                 return
             names = {p["name"] for p in self.store["profiles"]}
@@ -2428,14 +2502,17 @@ class CheatApp:
     def _read_params(self, force: bool) -> dict:
         target_hwnd = user32.GetForegroundWindow() or 0
         is_test = bool(target_hwnd) and target_hwnd == self.test_hwnd
+        t = self._active_target or {}       # 2.0：目标规则解析结果，缺省空 = 旧行为
         return {
             "interval": max(10, int(self.var_delay.get() or 45)),
             "pre": max(0, int(self.settings.get("pre_delay_ms", 180))),
             "keywords": [k.strip().lower() for k in (self.var_kw.get() or "").split(",") if k.strip()],
-            "check_fg": (not force) and bool(self.var_fg.get()) and not is_test,
+            "check_fg": ((not force) and bool(self.var_fg.get())
+                         and bool(t.get("require_foreground", True)) and not is_test),
             "release_mods": bool(self.settings.get("release_modifiers", True)),
             "uppercase": bool(self.settings.get("uppercase", False)),
-            "disable_ime": bool(self.settings.get("disable_ime", True)),
+            "disable_ime": bool(t.get("disable_ime", self.settings.get("disable_ime", True))),
+            "strategy_ref": str(t.get("strategy") or ""),
         }
 
     def _send_worker(self, cheat: dict, params: dict):
@@ -2451,7 +2528,13 @@ class CheatApp:
         check_fg = params["check_fg"]
         # 单条覆盖优先（1.6）：0 = 跟随全局
         interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
-        sp = SendParams.for_code(code, interval, params["pre"], params["uppercase"])
+        # 2.0 策略引擎：默认 fixed 且所有覆盖值为 None → 与 1.9.1 参数逐项一致
+        named = self.settings.get("strategies") or {}
+        strategy = resolve_strategy(named, cheat)
+        ref = params.get("strategy_ref")
+        if ref and not cheat.get("strategy") and ref in named:
+            strategy = normalize_strategy(named[ref])   # 目标规则引用的具名策略
+        sp = plan_send(strategy, code, interval, params["pre"], params["uppercase"])
         t0 = time.perf_counter()
 
         def history(result: str, detail: str):
@@ -2463,6 +2546,7 @@ class CheatApp:
                 "result": result, "detail": detail,
             }))
 
+        sent = 0
         try:
             # 权限不匹配时 SendInput 会"成功但不生效"，是最难自查的失败模式：必须提前拦下并说明
             if self._permission_mismatch_live():
@@ -2489,16 +2573,41 @@ class CheatApp:
 
             target_hwnd = user32.GetForegroundWindow() or 0
 
+            # 2.0 前置钩子：默认关闭；启用时返回 False 可否决本次发送
+            if not self.hooks.fire_before({"hwnd": target_hwnd}, cheat):
+                self.log("⏹ 前置钩子否决了本次发送。", "warn", from_thread=True)
+                history("fail", "前置钩子否决")
+                return
+
             if params["release_mods"]:
                 release_modifiers()
 
+            sent_total = 0
+            attempt = 0
             with ImeGuard(target_hwnd, params["disable_ime"]):
-                sent = type_text(
-                    sp, self._stop,
-                    send_key=send_key, sleep=time.sleep, lookup_vk=vk_for_char,
-                    check_target=(lambda: user32.GetForegroundWindow() == target_hwnd)
-                    if check_fg else None,
-                )
+                while True:
+                    remaining = code[sent_total:]
+                    sp = plan_send(strategy, remaining, interval, params["pre"],
+                                   params["uppercase"], attempt)
+                    try:
+                        sent = type_text(
+                            sp, self._stop,
+                            send_key=send_key, sleep=time.sleep, lookup_vk=vk_for_char,
+                            check_target=(lambda: user32.GetForegroundWindow() == target_hwnd)
+                            if check_fg else None,
+                        )
+                        sent_total += sent
+                        break
+                    except SendError as exc:
+                        # 2.0 adaptive：只对"丢字/失焦"这类失败补发剩余字符，
+                        # 固定/爆发策略永不重试（should_retry 恒 False）。
+                        sent_total += exc.sent
+                        if not should_retry(strategy, attempt, sent_total, total):
+                            raise
+                        attempt += 1
+                        self.log(f"⟳ 自适应重试 {attempt}：已发 {sent_total}/{total}，"
+                                 f"间隔自动加长…", "warn", from_thread=True)
+            sent = sent_total
 
             elapsed = time.perf_counter() - t0
             self._log_send_quality(code, sent, total, sp, elapsed)
@@ -2532,6 +2641,9 @@ class CheatApp:
         finally:
             self.events.put(("send_done", cid))
             self.sending.release()
+            # 2.0 后置钩子：成功与所有失败路径都会走到这里（幂等由钩子自身保证）
+            self.hooks.fire_after({"code": code, "profile": self.active_profile,
+                                   "sent": sent, "total": total})
 
     @staticmethod
     def _log_send_quality(code: str, sent: int, total: int, sp: SendParams, elapsed: float):
@@ -2884,6 +2996,8 @@ class CheatApp:
         self.settings["show_toast"] = bool(self.var_toast.get())
         self.settings["close_to_tray"] = bool(self.var_tray.get())
         self.settings["auto_switch"] = bool(self.var_auto_switch.get())
+        self.settings["hooks_enabled"] = bool(self.var_hooks.get())
+        self.hooks.enabled = self.settings["hooks_enabled"]
         try:
             self.settings["char_interval_ms"] = int(self.var_delay.get())
         except Exception:
@@ -2919,6 +3033,10 @@ class CheatApp:
         self.var_ime.set(bool(self.settings.get("disable_ime", True)))
         self.var_delay.set(int(self.settings.get("char_interval_ms", 45)))
         self.var_toast.set(bool(self.settings.get("show_toast", True)))
+        self.var_tray.set(bool(self.settings.get("close_to_tray", True)))
+        self.var_auto_switch.set(bool(self.settings.get("auto_switch", True)))
+        self.var_hooks.set(bool(self.settings.get("hooks_enabled", False)))
+        self.hooks.enabled = bool(self.var_hooks.get())
         self.var_profile.set(self.active_profile)
         self.var_group_filter.set("全部")
         self._refresh_profile_choices()
@@ -3189,6 +3307,7 @@ class CheatApp:
             self.settings["show_toast"] = bool(self.var_toast.get())
             self.settings["close_to_tray"] = bool(self.var_tray.get())
             self.settings["auto_switch"] = bool(self.var_auto_switch.get())
+            self.settings["hooks_enabled"] = bool(self.var_hooks.get())
             self.settings["char_interval_ms"] = int(self.var_delay.get())
             self.persist()
         except Exception:
@@ -3330,6 +3449,27 @@ def selftest() -> int:
     print(f"    发送历史: 脏记录过滤后 {len(hist)} 条 / 60 条有效记录截断为 {len(hist2)} 条")
     ok &= len(hist) == 30 and len(hist2) == 50
 
+    print("[2g] 2.0 通用输入平台：core / 目标 / 策略 / 钩子")
+    import vcct.core as core_mod
+    print(f"    core 公共 API {len(core_mod.__all__)} 项，配置 v{core_mod.STORE_VERSION}")
+    ok &= hasattr(core_mod, "Target") and hasattr(core_mod, "plan_send")
+    ts = normalize_targets([{"name": "VC", "match_type": "exe", "pattern": "gta-vc",
+                             "profile_ref": "默认"}])
+    hit = evaluate_targets(ts, "GTA", "gta-vc.exe")
+    print(f"    目标规则: 命中 {hit['name'] if hit else '无'} → 方案 {resolve_target(hit or {}, default_store())['profile']}")
+    ok &= bool(hit) and resolve_target(hit, default_store())["profile"] == "默认"
+    p_fixed = plan_send(normalize_strategy(None), "ASPIRINE", 45, 180)
+    p_retry = plan_send(normalize_strategy({"kind": "adaptive", "retries": 2}),
+                        "RINE", 45, 180, attempt=1)
+    print(f"    策略: fixed {p_fixed.interval_ms}ms/hold {p_fixed.hold_ms}ms；"
+          f"adaptive 重试 {p_retry.interval_ms}ms")
+    ok &= (p_fixed.interval_ms, p_fixed.hold_ms, p_fixed.pre_delay_ms) == (45, 22, 180)
+    ok &= p_retry.interval_ms > p_fixed.interval_ms and p_retry.pre_delay_ms == 0
+    bus = HookBus(enabled=False)
+    bus.register_before("veto", lambda t, c: False)
+    print(f"    钩子: 默认关闭时 fire_before={bus.fire_before({}, {})}（应为 True）")
+    ok &= bus.fire_before({}, {}) is True
+
     print("[3] 前台窗口探测：", foreground_info())
 
     # 真实注入测试：隐藏原生 Win32 窗口验证"扫描码→VK→WM_CHAR"全链路
@@ -3458,6 +3598,17 @@ def diagnose() -> int:
     return 0
 
 
+def show_crash_dialog(title: str, detail: str) -> None:
+    """2.0：崩溃弹窗的 UI 实现，注入给 core 的日志模块（实现层不依赖 tkinter）。"""
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(title, detail)
+        root.destroy()
+    except Exception:
+        pass
+
+
 def main() -> int:
     if not IS_WIN:
         print("本工具仅支持 Windows。")
@@ -3466,6 +3617,10 @@ def main() -> int:
         return diagnose()
     if "--selftest" in sys.argv:
         return selftest()
+    if "--cli" in sys.argv:
+        # 2.0-E：把 --cli 之后的参数原样转给 vcct.cli
+        from vcct.cli import main as cli_main
+        return cli_main(sys.argv[sys.argv.index("--cli") + 1:])
     if "--export-v2" in sys.argv:
         # 1.9：给仍用 1.6/1.7/1.8 的人留下显式降级出口（不覆盖当前 v3 配置）
         idx = sys.argv.index("--export-v2")
@@ -3480,7 +3635,7 @@ def main() -> int:
             print(f"导出失败：{exc}")
             return 1
 
-    install_crash_hooks()   # 之后任何未捕获异常都会落盘到 logs/app.log
+    install_crash_hooks(show_dialog=show_crash_dialog)   # 之后任何未捕获异常都会落盘到 logs/app.log
     append_log(f"===== 进程启动 pid={os.getpid()} =====")
 
     # 单实例：避免两个进程抢同一批全局热键，注册失败会让人误以为是"冲突"

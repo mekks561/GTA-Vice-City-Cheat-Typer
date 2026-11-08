@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""1.7：日志与崩溃钩子。模块级不导入 tkinter（崩溃弹窗内部延迟导入）。"""
+"""1.7 日志与崩溃钩子；2.0 起实现层零 tkinter（弹窗由 UI 层注入）。"""
 from __future__ import annotations
 
 import os
@@ -99,33 +99,37 @@ def append_log(text: str, level: str = "INFO") -> None:
         pass
 
 
-def _show_crash_dialog(title: str, detail: str) -> None:
-    global _crash_dialog_open
-    if _crash_dialog_open:  # 防止异常里再弹异常，无限递归
-        return
-    _crash_dialog_open = True
-    # 延迟导入：本模块要能在无 tkinter / 无桌面环境（含 CI）下被导入
-    import tkinter as tk
-    from tkinter import messagebox
+def _fallback_crash_notice(title: str, detail: str) -> None:
+    """core 默认行为：只落 stderr，不依赖 tkinter / 桌面。"""
     try:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror(title, detail)
-        root.destroy()
+        print(f"{title}: {detail}", file=sys.stderr)
     except Exception:
         pass
-    finally:
-        _crash_dialog_open = False
 
 
-def install_crash_hooks() -> None:
-    """未捕获异常（主线程 + 子线程）落盘，并告知用户日志位置。"""
+def install_crash_hooks(show_dialog=None) -> None:
+    """未捕获异常（主线程 + 子线程）落盘，并告知用户日志位置。
+
+    2.0：弹窗 UI 由调用方注入（`show_dialog(title, detail)`）。
+    实现层因此**零 tkinter 依赖**，core 可在无桌面环境导入；不注入时只写 stderr。
+    """
+    notify = show_dialog or _fallback_crash_notice
+
     def handle(exc_type, exc, tb, thread_name="main"):
+        global _crash_dialog_open
         text = "".join(traceback.format_exception(exc_type, exc, tb))
         append_log(f"未捕获异常（{thread_name}）\n{text}", "ERROR")
-        _show_crash_dialog(
-            f"{APP_NAME} 遇到问题",
-            f"程序捕获到未处理的异常，已写入日志：\n{log_file()}\n\n{exc_type.__name__}: {exc}")
+        if _crash_dialog_open:      # 防止异常里再弹异常，无限递归
+            return
+        _crash_dialog_open = True
+        try:
+            notify(f"{APP_NAME} 遇到问题",
+                   f"程序捕获到未处理的异常，已写入日志：\n{log_file()}\n\n"
+                   f"{exc_type.__name__}: {exc}")
+        except Exception:
+            pass
+        finally:
+            _crash_dialog_open = False
 
     def main_hook(exc_type, exc, tb):
         handle(exc_type, exc, tb, "main")
