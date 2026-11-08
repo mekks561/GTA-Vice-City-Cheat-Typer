@@ -11,8 +11,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from vcct.packs import (  # noqa: E402
-    PACK_FORMAT, diff_pack, make_pack, merge_pack, pack_record, pack_signature,
-    validate_pack,
+    PACK_FORMAT, auto_avoid_hotkeys, compare_pack_record, diff_pack, make_pack,
+    merge_pack, pack_record, pack_signature, validate_pack, _candidate_combos,
 )
 
 CHEATS = [
@@ -129,6 +129,89 @@ class TestDiffMerge(unittest.TestCase):
         self.assertEqual(rec["name"], "p")
         self.assertEqual(rec["pack_version"], 1)
         self.assertTrue(rec["imported_at"])
+
+
+class TestPackComparison(unittest.TestCase):
+    """1.9-H：包版本比对（纯本地）。"""
+
+    def test_first_import_is_new(self):
+        pack = make_pack("P", CHEATS)
+        status, old = compare_pack_record(pack, [])
+        self.assertEqual(status, "new")
+        self.assertIsNone(old)
+
+    def test_upgrade_when_version_higher(self):
+        pack = make_pack("P", CHEATS)
+        rec = pack_record(pack)
+        rec["pack_version"] = 0
+        status, old = compare_pack_record(pack, [rec])
+        self.assertEqual(status, "upgrade")
+        self.assertEqual(old["name"], "P")
+
+    def test_changed_when_sha_differs(self):
+        pack = make_pack("P", CHEATS)
+        rec = dict(pack_record(pack), sha256="different")
+        self.assertEqual(compare_pack_record(pack, [rec])[0], "changed")
+
+    def test_same_when_identical(self):
+        pack = make_pack("P", CHEATS)
+        self.assertEqual(compare_pack_record(pack, [pack_record(pack)])[0], "same")
+
+    def test_other_pack_name_ignored(self):
+        pack = make_pack("P", CHEATS)
+        self.assertEqual(compare_pack_record(pack, [pack_record(make_pack("Q", CHEATS))])[0],
+                         "new")
+
+
+class TestAutoAvoidHotkeys(unittest.TestCase):
+    """1.9-G：包内热键自动避让。"""
+
+    def test_candidates_order_and_no_f12(self):
+        cands = _candidate_combos()
+        self.assertEqual(cands[0], "F1")
+        self.assertEqual(cands[-1], "Alt+F11")
+        self.assertFalse(any("F12" in x for x in cands))
+        self.assertEqual(len(cands), len(set(cands)))
+
+    def test_conflicting_hotkey_moved(self):
+        pack = make_pack("P", [{"code": "NEWONE", "name": "新", "hotkey": "F4"}])
+        new_pack, changed = auto_avoid_hotkeys(pack, CHEATS, "Ctrl+Alt+P")
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(changed[0]["old"], "F4")
+        self.assertNotEqual(changed[0]["new"], "F4")
+        self.assertEqual(new_pack["cheats"][0]["hotkey"], changed[0]["new"])
+        self.assertEqual(pack["cheats"][0]["hotkey"], "F4", "不得修改入参")
+
+    def test_non_conflicting_hotkey_kept(self):
+        pack = make_pack("P", [{"code": "NEWONE", "name": "新", "hotkey": "Ctrl+Alt+F9"}])
+        _new, changed = auto_avoid_hotkeys(pack, CHEATS, "Ctrl+Alt+P")
+        self.assertEqual(changed, [], "合法且未冲突的自定义键应保持原样")
+
+    def test_same_code_local_is_not_conflict(self):
+        pack = make_pack("P", [{"code": "ASPIRINE", "name": "满血", "hotkey": "F4"}])
+        _new, changed = auto_avoid_hotkeys(pack, CHEATS, "Ctrl+Alt+P")
+        self.assertEqual(changed, [])
+
+    def test_internal_duplicates_avoided(self):
+        pack = make_pack("P", [
+            {"code": "AAA", "hotkey": "F6"},
+            {"code": "BBB", "hotkey": "F6"},
+            {"code": "CCC", "hotkey": "f6"},   # 大小写不敏感
+        ])
+        new_pack, changed = auto_avoid_hotkeys(pack, [], "Ctrl+Alt+P")
+        keys = [c["hotkey"] for c in new_pack["cheats"]]
+        self.assertEqual(len({k.lower() for k in keys}), 3)
+        self.assertEqual(len(changed), 2)
+
+    def test_pause_hotkey_is_reserved(self):
+        pack = make_pack("P", [{"code": "NEWONE", "hotkey": "Ctrl+Alt+P"}])
+        _new, changed = auto_avoid_hotkeys(pack, [], "Ctrl+Alt+P")
+        self.assertEqual(len(changed), 1)
+
+    def test_empty_hotkey_left_alone(self):
+        pack = make_pack("P", [{"code": "NEWONE", "hotkey": ""}])
+        _new, changed = auto_avoid_hotkeys(pack, CHEATS)
+        self.assertEqual(changed, [])
 
 
 if __name__ == "__main__":

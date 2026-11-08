@@ -67,7 +67,8 @@ class TestGuiSmoke(unittest.TestCase):
             app = app_module.CheatApp(root)
             root.update()
             for cls in (app_module.PackManagerDialog, app_module.TextImportDialog,
-                        app_module.TemplateDialog, app_module.SettingsDialog):
+                        app_module.TemplateDialog, app_module.HistoryDialog,
+                        app_module.HotkeyOverview, app_module.SettingsDialog):
                 dlg = cls(app) if cls is not app_module.SettingsDialog else cls(root, app)
                 root.update()
                 dlg.destroy()

@@ -204,6 +204,81 @@ def merge_pack(cheats: list[dict], pack: dict, selected_codes: list[str],
     return result, counts
 
 
+def _candidate_combos() -> list[str]:
+    """空闲键候选序列，顺序与 `hotkeys.candidate_combos()` 保持一致
+    （F1–F11 → Shift → Ctrl → Ctrl+Shift → Alt）。
+
+    这里刻意不 import hotkeys：packs.py 必须保持纯数据、零 ctypes 依赖，
+    2.0 抽 vcct-core 时可直接带走。
+    """
+    out = []
+    for prefix in ("", "Shift+", "Ctrl+", "Ctrl+Shift+", "Alt+"):
+        for i in range(1, 12):   # 避开 F12（调试器常占）
+            out.append(f"{prefix}F{i}")
+    return out
+
+
+def auto_avoid_hotkeys(pack: dict, cheats: list[dict],
+                       pause_hotkey: str = "Ctrl+Alt+P") -> tuple[dict, list[dict]]:
+    """1.9-G：包内热键与本地（或包内自身）冲突时，自动改到候选空闲键。
+
+    返回 (新包副本, 改键记录 [{code, old, new}])；不改入参。
+    判定口径与注册时一致：组合键大小写不敏感、忽略前后空格；空热键不参与。
+    同 code 的本地条目视为「将被这条包内条目替换」，不算冲突。
+    """
+    incoming_codes = {c["code"] for c in pack.get("cheats") or []}
+    used = {str(pause_hotkey or "").strip().lower()}
+    used |= {str(c.get("hotkey") or "").strip().lower()
+             for c in cheats
+             if c.get("hotkey") and str(c.get("code") or "").upper() not in incoming_codes}
+    candidates = _candidate_combos()
+    changed: list[dict] = []
+    new_cheats = []
+    for item in pack.get("cheats") or []:
+        c = dict(item)
+        hk = str(c.get("hotkey") or "").strip()
+        key = hk.lower()
+        if hk and key in used:
+            # 只在**真冲突**时改键；合法但不在候选表里的自定义组合（如 Win+F2）保持原样
+            free = next((x for x in candidates if x.lower() not in used), "")
+            if free:
+                changed.append({"code": c["code"], "old": hk, "new": free})
+                c["hotkey"] = free
+                used.add(free.lower())
+            else:
+                c["hotkey"] = ""     # 候选键全占满：留空由用户手动绑定
+                changed.append({"code": c["code"], "old": hk, "new": ""})
+        elif hk:
+            used.add(key)
+        new_cheats.append(c)
+    out = dict(pack)
+    out["cheats"] = new_cheats
+    return out, changed
+
+
+def compare_pack_record(pack: dict, records: list[dict]) -> tuple[str, dict | None]:
+    """1.9-H：与本地已安装记录比对，返回 (状态, 旧记录)。
+
+    状态：`new`（首次）/ `upgrade`（同名且 pack_version 更高）/
+    `changed`（同版本但内容校验和不同）/ `same`（完全一样）。
+    纯本地比较，不联网、不自动下载。
+    """
+    name = str(pack.get("name") or "")
+    old = next((r for r in (records or []) if str(r.get("name") or "") == name), None)
+    if old is None:
+        return "new", None
+    try:
+        new_v = int(pack.get("pack_version") or 0)
+        old_v = int(old.get("pack_version") or 0)
+    except (TypeError, ValueError):
+        new_v, old_v = 0, 0
+    if new_v > old_v:
+        return "upgrade", old
+    if str(old.get("sha256") or "") != str(pack.get("sha256") or ""):
+        return "changed", old
+    return "same", old
+
+
 def pack_record(pack: dict) -> dict:
     """生成写入 store["packs"] 的安装记录。"""
     return {

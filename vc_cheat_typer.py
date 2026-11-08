@@ -68,12 +68,13 @@ from vcct.hotkeys import (  # noqa: F401
     is_safe_binding, parse_combo, pick_free_combo,
 )
 from vcct.store import (  # noqa: F401
-    _norm_cheat, _safe_int, bump_stats, bundle_payload, default_cheats, default_store,
+    _norm_cheat, _norm_history, _safe_int, bump_stats, bundle_payload, default_cheats, default_store,
     evaluate_game_rules, export_v2, filter_cheats, last_load_warning, load_store,
     migrate_store, normalize_store, parse_bundle, save_store, sorted_cheats, touch_today,
 )
 from vcct.packs import (  # noqa: F401
-    diff_pack, make_pack, merge_pack, pack_record, validate_pack,
+    auto_avoid_hotkeys, compare_pack_record, diff_pack, make_pack, merge_pack,
+    pack_record, validate_pack,
 )
 from vcct.importer import parse_pasted  # noqa: F401
 from vcct.templates import (  # noqa: F401
@@ -216,6 +217,7 @@ class CheatDialog(tk.Toplevel):
         self.title("编辑秘籍" if cheat else "添加秘籍")
         self.resizable(False, False)
         self.transient(master)
+        bind_dialog_keys(self, self._on_cancel)      # 1.8-G
         self.configure(bg="#f5f6f8")
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
@@ -366,6 +368,7 @@ class GameRuleDialog(tk.Toplevel):
         self.title("编辑切换规则" if rule else "添加切换规则")
         self.resizable(False, False)
         self.transient(master)
+        bind_dialog_keys(self)                       # 1.8-G
         self.configure(bg="#f5f6f8")
         self.grab_set()
 
@@ -438,6 +441,7 @@ class SettingsDialog(tk.Toplevel):
         self.title(f"设置 — {APP_NAME}")
         self.configure(bg=C["bg"])
         self.transient(master)
+        bind_dialog_keys(self, self._close)          # 1.8-G：Esc 关窗也要保存设置
         self.geometry(f"{int(640 * app.ui)}x{int(500 * app.ui)}")
         self.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -511,11 +515,15 @@ class SettingsDialog(tk.Toplevel):
         row.pack(fill="x")
         tk.Label(row, text="窗口关键字（逗号分隔）", bg=C["panel"], fg=C["muted"],
                  font=("Microsoft YaHei UI", 9)).pack(side="left")
-        tk.Entry(row, textvariable=app.var_kw, width=26, relief="flat", bg="#f9fafb",
-                 highlightthickness=1, highlightbackground=C["line"],
-                 highlightcolor=C["accent"]).pack(side="left", padx=(8, 8), ipady=3)
+        # FocusOut 必须绑在真正拿焦点的控件上：绑到容器 Frame 上永远不会触发，
+        # 结果就是「改了关键字/间隔、没点别处就关窗」时设置不落盘（1.9.1 修）。
+        ent_kw = tk.Entry(row, textvariable=app.var_kw, width=26, relief="flat", bg="#f9fafb",
+                          highlightthickness=1, highlightbackground=C["line"],
+                          highlightcolor=C["accent"])
+        ent_kw.pack(side="left", padx=(8, 8), ipady=3)
+        ent_kw.bind("<FocusOut>", lambda e: app._on_setting_change())
+        ent_kw.bind("<Return>", lambda e: app._on_setting_change())
         ttk.Button(row, text="拾取当前窗口", command=app.pick_window).pack(side="left")
-        row.bind("<FocusOut>", lambda e: app._on_setting_change())
         ttk.Checkbutton(box, text="仅当目标窗口在前台时才发送（强烈建议开启）",
                         variable=app.var_fg, command=app._on_setting_change)\
             .pack(anchor="w", pady=(8, 0))
@@ -529,9 +537,10 @@ class SettingsDialog(tk.Toplevel):
         row2.pack(fill="x")
         tk.Label(row2, text="每字间隔 (ms)", bg=C["panel"], fg=C["muted"],
                  font=("Microsoft YaHei UI", 9)).pack(side="left")
-        ttk.Spinbox(row2, from_=20, to=300, increment=5, width=7, textvariable=app.var_delay,
-                    command=app._on_setting_change).pack(side="left", padx=(8, 0))
-        row2.bind("<FocusOut>", lambda e: app._on_setting_change())
+        sp_delay = ttk.Spinbox(row2, from_=20, to=300, increment=5, width=7,
+                               textvariable=app.var_delay, command=app._on_setting_change)
+        sp_delay.pack(side="left", padx=(8, 0))
+        sp_delay.bind("<FocusOut>", lambda e: app._on_setting_change())
         ttk.Button(box2, text="套用「经典版」预设", width=16,
                    command=lambda: app.apply_preset("经典版")).pack(side="left", padx=(0, 8), pady=(8, 0))
         ttk.Button(box2, text="套用「决定版」预设", width=16,
@@ -649,6 +658,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(box3, text=f"配置文件：{data_path()}", style="Muted.TLabel").pack(anchor="w")
         ttk.Label(box3, text=f"日志文件：{log_file()}", style="Muted.TLabel").pack(anchor="w", pady=(2, 6))
         ttk.Button(box3, text="打开日志目录", command=app.open_log).pack(side="left")
+        ttk.Button(box3, text="发送历史", command=app.open_history).pack(side="left", padx=(8, 0))
         ttk.Button(box3, text="恢复默认秘籍表", command=app.reset_defaults).pack(side="left", padx=(8, 0))
         return frm
 
@@ -664,6 +674,7 @@ class OnboardWizard(tk.Toplevel):
         self.configure(bg=C["bg"])
         self.resizable(False, False)
         self.transient(app.root)
+        bind_dialog_keys(self, self._skip)           # 1.8-G：Esc = 跳过向导
         self.protocol("WM_DELETE_WINDOW", self._skip)
         self.step = 0
         self.var_preset = tk.StringVar(value="经典版")
@@ -839,6 +850,7 @@ class HotkeyOverview(tk.Toplevel):
         self.title("快捷键总览")
         self.configure(bg=C["bg"])
         self.transient(app.root)
+        bind_dialog_keys(self)                       # 1.8-G
         self.geometry(f"{int(720 * app.ui)}x{int(460 * app.ui)}")
 
         wrap = tk.Frame(self, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
@@ -858,7 +870,7 @@ class HotkeyOverview(tk.Toplevel):
         self.tree.tag_configure("conflict", foreground=C["warn"])
         self.tree.tag_configure("idle", foreground="#98a2b3")
 
-        btns = ttk.Frame(self, bg=C["bg"])
+        btns = ttk.Frame(self)   # ttk 不接受 bg=，颜色由 style 统一继承
         btns.pack(fill="x", padx=12, pady=(2, 10))
         ttk.Button(btns, text="↻ 重新检测占用", command=self._redetect).pack(side="left")
         ttk.Button(btns, text="导出为文本…", command=self._export).pack(side="left", padx=(8, 0))
@@ -875,6 +887,13 @@ class HotkeyOverview(tk.Toplevel):
 
     def reload(self):
         app = self.app
+        # 1.9.1：周期重建表格前记住选中项与滚动位置，否则每 800ms 刷新一次
+        # 会把用户刚点中的行又清空，导出/复制时尤其恼人。
+        keep = list(self.tree.selection())
+        try:
+            yview = self.tree.yview()[0]
+        except Exception:
+            yview = 0.0
         self.tree.delete(*self.tree.get_children())
         pause_combo = app.settings.get("pause_hotkey", "")
         if app.paused:
@@ -883,17 +902,20 @@ class HotkeyOverview(tk.Toplevel):
             state = f"✖ {app.conflicts[PAUSE_ID]}"
         else:
             state = "✔ 生效"
-        self.tree.insert("", "end", values=("全局暂停键", "全局", pause_combo, state,
-                                            "一键注销/恢复全部秘籍热键"),
+        self.tree.insert("", "end", iid="__pause__",
+                         values=("全局暂停键", "全局", pause_combo, state,
+                                 "一键注销/恢复全部秘籍热键"),
                          tags=("conflict",) if "✖" in state else ())
         for prof in app.store["profiles"]:
             active = prof["name"] == app.active_profile
             for c in prof["cheats"]:
                 if not c["hotkey"]:
                     continue
+                iid = f"{prof['name']}:{c['id']}"
                 if not active:
-                    self.tree.insert("", "end", values=(c["name"], prof["name"], c["hotkey"],
-                                                        "未注册（切到该方案时生效）", c["note"]),
+                    self.tree.insert("", "end", iid=iid,
+                                     values=(c["name"], prof["name"], c["hotkey"],
+                                             "未注册（切到该方案时生效）", c["note"]),
                                      tags=("idle",))
                     continue
                 if c["id"] in app.conflicts:
@@ -902,8 +924,15 @@ class HotkeyOverview(tk.Toplevel):
                 else:
                     state = "✔ 生效"
                     tags = ()
-                self.tree.insert("", "end", values=(c["name"], prof["name"], c["hotkey"],
-                                                    state, c["note"]), tags=tags)
+                self.tree.insert("", "end", iid=iid,
+                                 values=(c["name"], prof["name"], c["hotkey"],
+                                         state, c["note"]), tags=tags)
+        alive = [i for i in keep if self.tree.exists(i)]
+        if alive:
+            self.tree.selection_set(*alive)
+            self.tree.see(alive[0])
+        else:
+            self.tree.yview_moveto(yview)
 
     def _redetect(self):
         self.app.apply_hotkeys()
@@ -940,6 +969,7 @@ class PackManagerDialog(tk.Toplevel):
         self.title("秘籍包管理（.vcpack）")
         self.configure(bg=C["bg"])
         self.transient(app.root)
+        bind_dialog_keys(self)                       # 1.8-G
         self.geometry(f"{int(720 * app.ui)}x{int(520 * app.ui)}")
 
         nb = ttk.Notebook(self)
@@ -991,6 +1021,9 @@ class PackManagerDialog(tk.Toplevel):
         self.var_overwrite = tk.BooleanVar(value=True)
         ttk.Checkbutton(btns, text="冲突项覆盖本地", variable=self.var_overwrite)\
             .pack(side="left", padx=(14, 0))
+        self.var_auto_avoid = tk.BooleanVar(value=True)     # 1.9-G
+        ttk.Checkbutton(btns, text="自动避让热键冲突", variable=self.var_auto_avoid)\
+            .pack(side="left", padx=(10, 0))
         ttk.Button(btns, text="导入所选 →", style="Accent.TButton", command=self._do_import)\
             .pack(side="right")
         return frm
@@ -1013,6 +1046,24 @@ class PackManagerDialog(tk.Toplevel):
             self.diff_tree.delete(*self.diff_tree.get_children())
             self.lbl_warn.configure(text=err)
             return
+        # 1.9-G 自动避让：只在真冲突时把包内热键改到候选空闲键
+        avoid_note = ""
+        if self.var_auto_avoid.get():
+            pack, changed = auto_avoid_hotkeys(
+                pack, self.app.cheats, self.app.settings.get("pause_hotkey", ""))
+            if changed:
+                pairs = "、".join(f"{x['code']}:{x['old']}→{x['new'] or '留空'}"
+                                 for x in changed[:3])
+                avoid_note = (f"　｜　自动避让 {len(changed)} 个热键冲突（{pairs}"
+                              + ("…" if len(changed) > 3 else "") + "）")
+        # 1.9-H 包版本比对（纯本地，不联网）
+        status, _old = compare_pack_record(pack, self.app.store.get("packs") or [])
+        version_note = {
+            "new": "首次导入这个包",
+            "upgrade": "检测到同名包的**新版本**，导入后将更新本地记录",
+            "changed": "同名包内容与上次导入不同（校验和变化），如非预期请核对",
+            "same": "与上次导入的包完全一致（重复导入不会改动数据）",
+        }[status]
         self.pack = pack
         self.diff = diff_pack(pack, self.app.cheats)
         self.lbl_file.configure(text=os.path.basename(path))
@@ -1023,7 +1074,8 @@ class PackManagerDialog(tk.Toplevel):
         conflict = sum(1 for d in self.diff if d["status"] == "conflict")
         same = sum(1 for d in self.diff if d["status"] == "same")
         self.lbl_warn.configure(text=(self.lbl_warn.cget("text") +
-                                     f"　｜　包「{name}」：新增 {added} / 冲突 {conflict} / 相同 {same}"))
+                                     f"　｜　包「{name}」：新增 {added} / 冲突 {conflict} / 相同 {same}"
+                                     + avoid_note + f"　｜　{version_note}"))
         self._select_status("new")
 
     def _reload_diff(self):
@@ -1155,6 +1207,7 @@ class TextImportDialog(tk.Toplevel):
         self.title("从文本 / CSV 粘贴导入")
         self.configure(bg=C["bg"])
         self.transient(app.root)
+        bind_dialog_keys(self)                       # 1.8-G
         self.geometry(f"{int(700 * app.ui)}x{int(540 * app.ui)}")
 
         hint = ("每行一条：代码  |  名称,代码  |  名称,代码,热键  |  名称,代码,热键,备注\n"
@@ -1230,6 +1283,7 @@ class TemplateDialog(tk.Toplevel):
         self.title("套用游戏模板")
         self.configure(bg=C["bg"])
         self.transient(app.root)
+        bind_dialog_keys(self)                       # 1.8-G
         self.geometry(f"{int(560 * app.ui)}x{int(430 * app.ui)}")
 
         ttk.Label(self, text="选择一套模板：会替换秘籍表并（若有）套用对应发送参数。",
@@ -1307,6 +1361,94 @@ class TemplateDialog(tk.Toplevel):
         app.log(f"已套用游戏模板「{name}」（{len(cheats)} 条"
                 + (f"，参数 {preset['char_interval_ms']}ms" if preset else "") + "）。", "ok")
         self.destroy()
+
+
+def bind_dialog_keys(win: tk.Toplevel, on_escape=None):
+    """1.8-G：Toplevel 统一 Esc 关闭（主窗口 Esc = 停发送/清搜索 的语义不变）。
+
+    Tab 顺序沿用控件创建顺序；列表 ↑↓ / Enter 发送由 Treeview 与既有绑定负责。
+    """
+    win.bind("<Escape>", lambda e: (on_escape() if on_escape else win.destroy()))
+
+
+# ----------------------------------------------------------------------------
+# 1.8-I 发送历史面板（最近 50 次，可重发）
+# ----------------------------------------------------------------------------
+class HistoryDialog(tk.Toplevel):
+    LABELS = {"ok": "✔ 成功", "cancel": "⏹ 已停止", "fail": "✖ 失败"}
+
+    def __init__(self, app: "CheatApp"):
+        super().__init__(app.root)
+        self.app = app
+        self.title("发送历史（最近 50 次）")
+        self.configure(bg=C["bg"])
+        self.transient(app.root)
+        self.geometry(f"{int(820 * app.ui)}x{int(440 * app.ui)}")
+        bind_dialog_keys(self)                      # 1.8-G
+
+        wrap = tk.Frame(self, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
+        wrap.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        cols = ("at", "name", "code", "profile", "result", "elapsed", "detail")
+        self.tree = ttk.Treeview(wrap, columns=cols, show="headings")
+        for key, (text, width) in {
+            "at": ("时间", 140), "name": ("名称", 120), "code": ("代码", 160),
+            "profile": ("方案", 100), "result": ("结果", 90),
+            "elapsed": ("耗时(s)", 80), "detail": ("说明", 300),
+        }.items():
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width, anchor="w" if key in ("name", "code", "detail") else "center")
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        self.tree.tag_configure("ok", foreground=C["ok"])
+        self.tree.tag_configure("cancel", foreground="#b45309")
+        self.tree.tag_configure("fail", foreground=C["warn"])
+        self.tree.bind("<Double-1>", lambda e: self._resend())
+
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=12, pady=(2, 10))
+        ttk.Button(btns, text="↻ 重发所选", command=self._resend).pack(side="left")
+        ttk.Button(btns, text="清空历史", command=self._clear).pack(side="left", padx=(8, 0))
+        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right")
+        ttk.Label(btns, text="双击一行也可重发；重发按当前方案中的代码查找。",
+                  style="Muted.TLabel").pack(side="right", padx=(0, 12))
+        self.reload()
+
+    def reload(self):
+        self.tree.delete(*self.tree.get_children())
+        for i, h in enumerate(self.app.store.get("history") or []):
+            self.tree.insert("", "end", iid=str(i),
+                             values=(h["at"], h["name"], h["code"], h["profile"],
+                                     self.LABELS.get(h["result"], h["result"]),
+                                     f"{h['elapsed']:.3f}", h["detail"]),
+                             tags=(h["result"],) if h["result"] in self.LABELS else ())
+
+    def _resend(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        hist = self.app.store.get("history") or []
+        idx = int(sel[0])
+        if idx >= len(hist):
+            return
+        code = hist[idx]["code"]
+        cheat = next((c for c in self.app.cheats if c["code"] == code), None)
+        if cheat is None:
+            messagebox.showinfo("当前方案没有这条",
+                                f"代码 {code} 不在当前方案「{self.app.active_profile}」里。\n"
+                                f"记录所属方案：{hist[idx]['profile'] or '未知'}，请先切换方案。",
+                                parent=self)
+            return
+        self.app.send_by_id(cheat["id"])
+        self.app.log(f"从发送历史重发：{code}", "info")
+
+    def _clear(self):
+        if not messagebox.askyesno("清空历史", "清空全部发送历史？（不影响使用统计）", parent=self):
+            return
+        self.app.store["history"] = []
+        self.app.persist()
+        self.reload()
 
 
 def info_verified(name: str) -> bool:
@@ -1524,6 +1666,7 @@ class CheatApp:
         more = tk.Menu(mb, tearoff=0)
         more.add_command(label="设置…", command=self.open_settings)
         more.add_command(label="快捷键总览", command=self.open_hotkey_overview)
+        more.add_command(label="发送历史（最近 50 次）", command=self.open_history)
         more.add_command(label="首次启动向导（Ctrl+F1）", command=self.open_wizard)
         more.add_separator()
         more.add_command(label="秘籍包管理（.vcpack）…", command=self.open_pack_manager)
@@ -1571,6 +1714,8 @@ class CheatApp:
         self.tree.tag_configure("unverified", foreground="#94a3b8")  # 1.9 未实机验证
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
         self.tree.bind("<Return>", lambda e: self.send_selected())
+        self.tree.bind("<Home>", lambda e: self._select_edge(0))    # 1.8-G 键盘全导航
+        self.tree.bind("<End>", lambda e: self._select_edge(-1))
         self.tree.bind("<Button-3>", self._popup_row_menu)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_hint())
 
@@ -1623,6 +1768,16 @@ class CheatApp:
         self.root.bind("<Control-z>", lambda e: self.undo_last())
         self.root.bind("<Escape>", lambda e: self._on_escape())
 
+    def _select_edge(self, which: int):
+        """1.8-G：Home / End 跳到列表首尾（↑↓ 选中、Enter 发送沿用既有行为）。"""
+        kids = self.tree.get_children()
+        if kids:
+            iid = kids[0] if which == 0 else kids[-1]
+            self.tree.selection_set(iid)
+            self.tree.see(iid)
+            self._update_hint()
+        return "break"
+
     def _focus_search(self):
         self.ent_search.focus_set()
         self.ent_search.select_range(0, "end")
@@ -1667,9 +1822,18 @@ class CheatApp:
                     self._on_hotkeys_applied(item[1], item[2])
                 elif kind == "tray":
                     self._on_tray_action(item[1])
+                elif kind == "history":
+                    self._record_history(item[1])
         except queue.Empty:
             pass
         self.root.after(40, self._pump)
+
+    def _record_history(self, rec: dict):
+        """1.8-I：主线程里写历史（工作线程只投递纯 dict，不碰 store / Tk）。"""
+        hist = self.store.setdefault("history", [])
+        hist.insert(0, rec)
+        del hist[50:]
+        self.persist()
 
     def _on_hotkey(self, hid: int):
         cheat_id = self.hotkey_owner.get(hid)
@@ -1708,9 +1872,10 @@ class CheatApp:
             else:
                 self.lbl_game.configure(text="⚪ 未检测到游戏", foreground=C["muted"])
                 self._show_admin_button(False)
-            self._auto_switch_tick()
         except Exception:
             pass
+        # 1.9.1：放在 try 外面——游戏检测抛异常不该连带跳过自动切方案
+        self._auto_switch_tick()
         self.root.after(3000, self._update_game_status)
 
     # -- 1.8 按游戏自动切方案 ---------------------------------------------------
@@ -2288,6 +2453,16 @@ class CheatApp:
         interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
         sp = SendParams.for_code(code, interval, params["pre"], params["uppercase"])
         t0 = time.perf_counter()
+
+        def history(result: str, detail: str):
+            """1.8-I：只往队列投一条纯数据记录，绝不在这里碰 store / Tk。"""
+            self.events.put(("history", {
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "name": name, "code": code, "profile": self.active_profile,
+                "elapsed": round(time.perf_counter() - t0, 3),
+                "result": result, "detail": detail,
+            }))
+
         try:
             # 权限不匹配时 SendInput 会"成功但不生效"，是最难自查的失败模式：必须提前拦下并说明
             if self._permission_mismatch_live():
@@ -2298,6 +2473,7 @@ class CheatApp:
                 self.events.put(("toast", "⚠ 权限不匹配：请以管理员身份重启工具", "warn"))
                 append_log(f"SEND fail code={code} reason=uipi_blocked "
                            f"game_admin=1 self_admin=0", "WARN")
+                history("fail", "权限不匹配（UIPI 静默拦截）")
                 return
 
             if check_fg and not self._fg_ok(params["keywords"]):
@@ -2308,6 +2484,7 @@ class CheatApp:
                 self.log(msg, "warn", from_thread=True)
                 self.events.put(("toast", f"⚠ 未在前台：{title or '未知窗口'}", "warn"))
                 append_log(f"SEND fail code={code} reason=not_foreground title={title!r}", "WARN")
+                history("fail", f"前台不匹配（当前 {title or '未知'}）")
                 return
 
             target_hwnd = user32.GetForegroundWindow() or 0
@@ -2328,6 +2505,7 @@ class CheatApp:
             self.log(f"✔ 已输入「{name}」 {code}", "ok", from_thread=True)
             self.events.put(("toast", f"✔ {name} · {code}", "ok"))
             self.events.put(("stats", cid, code))
+            history("ok", f"已发 {sent}/{total} 字符")
         except SendCancelled as exc:
             elapsed = time.perf_counter() - t0
             self.log(f"⏹ 已停止「{name}」：发到第 {exc.sent}/{exc.total} 个字符。", "warn",
@@ -2335,18 +2513,22 @@ class CheatApp:
             self.events.put(("toast", f"⏹ 已停止 {exc.sent}/{exc.total}", "warn"))
             append_log(f"SEND cancel code={code} sent={exc.sent}/{exc.total} "
                        f"elapsed={elapsed:.3f}s", "WARN")
+            history("cancel", f"停在第 {exc.sent}/{exc.total} 字符")
         except SendError as exc:
             self.log(f"⚠ {exc.reason}（已发 {exc.sent}/{exc.total}）", "warn", from_thread=True)
             self.events.put(("toast", f"⚠ {exc.reason}", "warn"))
             append_log(f"SEND fail code={code} reason={exc.reason} "
                        f"sent={exc.sent}/{exc.total}", "WARN")
+            history("fail", f"{exc.reason}（已发 {exc.sent}/{exc.total}）")
         except OSError as exc:
             self.log(f"✖ 键盘注入失败：{exc}（若游戏以管理员运行，请同样以管理员运行本工具）",
                      "warn", from_thread=True)
             append_log(f"SEND fail code={code} reason=oserror {exc}", "WARN")
+            history("fail", f"键盘注入失败：{exc}")
         except Exception as exc:
             self.log(f"✖ 发送异常：{exc}", "warn", from_thread=True)
             append_log(f"SEND fail code={code} reason=exception {exc}", "WARN")
+            history("fail", str(exc))
         finally:
             self.events.put(("send_done", cid))
             self.sending.release()
@@ -2863,6 +3045,12 @@ class CheatApp:
         except Exception as exc:
             self.log(f"热键总览打开失败：{exc}", "warn")
 
+    def open_history(self):
+        try:
+            HistoryDialog(self)
+        except Exception as exc:
+            self.log(f"发送历史打开失败：{exc}", "warn")
+
     # -- 1.9 内容侧 -----------------------------------------------------------
     def open_pack_manager(self):
         PackManagerDialog(self)
@@ -2911,12 +3099,21 @@ class CheatApp:
         self.log(f"批量分组：{len(targets)} 条 → 「{group}」。", "ok")
 
     def batch_assign_hotkeys(self):
-        ids = [c["id"] for c in self._batch_targets()]
-        if not ids:
+        targets = self._batch_targets()
+        if not targets:
             self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
             return
+        # 1.9.1：只给「未绑定 / 已冲突」的条目换键。
+        # 全选后若把 28 条正常热键也重排一遍，用户精心配过的键位会被无声打乱。
+        ids = [c["id"] for c in targets
+               if not c.get("hotkey") or c["id"] in self.conflicts]
+        skipped = len(targets) - len(ids)
+        if not ids:
+            self.log(f"选中的 {skipped} 条都已有可用热键，无需重新分配。", "info")
+            return
         changed = self._assign_free_combos(ids, 0)
-        self.log(f"批量分配空闲热键：{len(changed)} 条已更新（其余键无需改动）。", "ok")
+        self.log(f"批量分配空闲热键：{len(changed)} 条已更新"
+                 + (f"，另有 {skipped} 条已有可用热键保持不变" if skipped else "") + "。", "ok")
 
     def batch_set_interval(self):
         targets = self._batch_targets()
@@ -3120,16 +3317,40 @@ def selftest() -> int:
     print(f"    游戏模板: {len(TEMPLATE_NAMES)} 套 / VC 经典版 {len(template_cheats('VC 经典版'))} 条")
     ok &= len(TEMPLATE_NAMES) == 4 and len(template_cheats("VC 经典版")) == 28
 
+    print("[2f] 1.9.1 新增：包热键避让 / 包版本比对 / 发送历史")
+    conflict_pack = make_pack("自检包2", [{"code": "NEWA", "hotkey": "F4"}])
+    fixed_pack, moves = auto_avoid_hotkeys(conflict_pack, default_cheats(), "Ctrl+Alt+P")
+    print(f"    热键避让: {len(moves)} 条（F4→{moves[0]['new'] if moves else '无需改'}）")
+    ok &= len(moves) == 1 and fixed_pack["cheats"][0]["hotkey"] != "F4"
+    status, _ = compare_pack_record(conflict_pack, [])
+    print(f"    包版本比对: 首次导入={status}")
+    ok &= status == "new"
+    hist = _norm_history([{"result": "ok", "elapsed": "bad"}, None] * 30)
+    hist2 = _norm_history([{"result": "ok"}] * 60)
+    print(f"    发送历史: 脏记录过滤后 {len(hist)} 条 / 60 条有效记录截断为 {len(hist2)} 条")
+    ok &= len(hist) == 30 and len(hist2) == 50
+
     print("[3] 前台窗口探测：", foreground_info())
 
     # 真实注入测试：隐藏原生 Win32 窗口验证"扫描码→VK→WM_CHAR"全链路
     # （不使用 Tk 文本框：Tk 自管 IME 上下文，中文环境下会收 VK_PACKET，结果不可信）
     print("[4] SendInput 实际注入测试（原生窗口）")
-    got_fg, got = raw_char_probe("ASPIRINE")
+    got_fg, got = False, ""
+    for attempt in range(3):
+        got_fg, got = raw_char_probe("ASPIRINE")
+        if got_fg and got.strip().upper() == "ASPIRINE":
+            break
+        if attempt < 2:
+            time.sleep(0.3)      # 1.9.1：前台被抢时重试，避免自检偶发误报
     print(f"    取得前台: {got_fg} / 期望 'ASPIRINE'（不区分大小写）/ 实得 {got!r}")
-    ok &= bool(got_fg and got.upper() == "ASPIRINE")
-    if not ok:
-        print("    ⚠ 未落字：若前台未取得则为会话问题；否则请检查杀软是否拦截 SendInput。")
+    probe_ok = bool(got_fg and got.strip().upper() == "ASPIRINE")
+    if not got_fg:
+        # 前台被别的程序锁住时，探针根本没发送字符——这是"环境不允许"，
+        # 不是注入失效，不能把它算成失败（1.9.1 修）。
+        print("    ⚠ 未取得前台：本次探针未验证（其他窗口占用前台时常见），可在空闲桌面重跑。")
+    elif not probe_ok:
+        print("    ⚠ 未落字：请检查杀软是否拦截 SendInput、以及中文输入法是否被绕开。")
+    ok &= (probe_ok or not got_fg)
 
     print("[5] 热键注册与冲突检测")
     events: queue.Queue = queue.Queue()

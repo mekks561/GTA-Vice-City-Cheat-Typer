@@ -254,6 +254,32 @@ def _norm_packs(raw) -> list[dict]:
     return out
 
 
+def _norm_history(raw, limit: int = 50) -> list[dict]:
+    """1.8-I 发送历史（最多 50 条，最新在前）。脏记录逐条丢弃。"""
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue          # 脏记录不计入上限：先过滤再截断
+        try:
+            elapsed = round(float(item.get("elapsed") or 0), 3)
+        except (TypeError, ValueError):
+            elapsed = 0.0
+        out.append({
+            "at": str(item.get("at") or ""),
+            "name": str(item.get("name") or ""),
+            "code": str(item.get("code") or ""),
+            "profile": str(item.get("profile") or ""),
+            "result": str(item.get("result") or ""),
+            "elapsed": max(0.0, elapsed),
+            "detail": str(item.get("detail") or ""),
+        })
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
 def _norm_ui(raw) -> dict:
     """UI 偏好（窗口位置 / 列宽），只留白名单字段。"""
     if not isinstance(raw, dict):
@@ -351,6 +377,7 @@ def normalize_store(raw: dict) -> dict:
         "games": _norm_games(migrated.get("games")),   # 1.8：可选字段，缺省空 = 不自动切
         "packs": _norm_packs(migrated.get("packs")),   # 1.9：已安装秘籍包记录
         "ui": _norm_ui(migrated.get("ui")),           # 1.9：窗口位置 / 列宽
+        "history": _norm_history(migrated.get("history")),  # 1.8-I：最近 50 次发送
     }
 
 
@@ -366,6 +393,7 @@ def default_store() -> dict:
         "games": [],
         "packs": [],
         "ui": {},
+        "history": [],
     }
 
 
@@ -468,6 +496,7 @@ def save_store(store: dict, path: str | None = None) -> None:
         "games": _norm_games(store.get("games")),
         "packs": _norm_packs(store.get("packs")),
         "ui": _norm_ui(store.get("ui")),
+        "history": _norm_history(store.get("history")),
     }
     tmp = path + ".tmp"
     try:
@@ -499,6 +528,7 @@ def bundle_payload(store: dict) -> dict:
         "games": _norm_games(store.get("games")),
         "packs": _norm_packs(store.get("packs")),
         "ui": _norm_ui(store.get("ui")),
+        "history": _norm_history(store.get("history")),
     }
 
 

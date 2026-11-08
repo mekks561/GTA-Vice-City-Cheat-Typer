@@ -460,13 +460,22 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
             user32.DestroyWindow(h)
             return 0
         if m == 0x0002:  # WM_DESTROY
-            u32.PostQuitMessage(0)
+            # 1.9.1：绝不在这里 PostQuitMessage。
+            # 本函数用的是「PeekMessage + 截止时间」自泵循环，不是 GetMessage 主循环；
+            # 每次 DestroyWindow 留下的 WM_QUIT 会让**下一次**探针刚进泵就 break，
+            # 表现为同进程第二次调用永远收不到任何字符。
             return 0
         return user32.DefWindowProcW(h, m, wp, lp)
 
-    u32 = user32
     cb = WNDPROC(_wndproc)
-    proto_holder["cb"] = cb  # 防止回调被 GC
+    proto_holder["cb"] = cb  # 防止回调被 GC（窗口类被注销前必须一直活着）
+    # 1.9.1：窗口类必须每次唯一并在结束时注销。
+    # 旧实现固定类名 + 局部 WNDPROC：第二次调用时 RegisterClassW 报 1410
+    # ("class already exists") 后直接复用旧类，而旧类的回调对象早已被回收 →
+    # 窗口过程是野指针，WM_CHAR 全丢。
+    cls_name = f"{_RAW_PROBE_CLASS}_{time.time_ns()}"
+    user32.UnregisterClassW.argtypes = (wt.LPCWSTR, wt.HINSTANCE)
+    user32.UnregisterClassW.restype = wt.BOOL
 
     class _WC(ctypes.Structure):
         _fields_ = [("style", wt.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
@@ -476,19 +485,19 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
 
     wc = _WC()
     wc.lpfnWndProc = cb
-    wc.lpszClassName = _RAW_PROBE_CLASS
+    wc.lpszClassName = cls_name
     wc.hbrBackground = 6
     user32.RegisterClassW.argtypes = (ctypes.POINTER(_WC),)
     if not user32.RegisterClassW(ctypes.byref(wc)):
-        if ctypes.get_last_error() != 1410:  # class already exists
-            return False, ""
+        return False, ""
     user32.CreateWindowExW.restype = wt.HWND
     user32.CreateWindowExW.argtypes = (wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int,
                                        ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HWND, wt.HMENU,
                                        wt.HINSTANCE, ctypes.c_void_p)
-    hwnd = user32.CreateWindowExW(0, _RAW_PROBE_CLASS, "注入自检", 0x00CF0000,
+    hwnd = user32.CreateWindowExW(0, cls_name, "注入自检", 0x00CF0000,
                                   220, 220, 360, 96, None, None, None, None)
     if not hwnd:
+        user32.UnregisterClassW(cls_name, None)
         return False, ""
     user32.ShowWindow.argtypes = (wt.HWND, ctypes.c_int)
     user32.ShowWindow(hwnd, 5)
@@ -507,6 +516,11 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
                 vk = VK_BY_NAME.get(ch.lower())
                 if vk is None:
                     break
+                # 1.9.1：自检窗口可能在发送途中被别的程序抢走前台（浏览器弹窗等）。
+                # 丢前台后剩余字符会打到别处，诊断就会误报"丢字"，所以逐字重新抢回。
+                if user32.GetForegroundWindow() != hwnd:
+                    force_foreground(hwnd)
+                    time.sleep(0.05)
                 press_key(vk, hold_ms)
                 time.sleep(gap_ms / 1000.0)
         except OSError:
@@ -532,6 +546,7 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
         user32.DestroyWindow(hwnd)
     except Exception:
         pass
+    user32.UnregisterClassW(cls_name, None)   # 不留野指针类名
     return got_fg, "".join(events)
 
 

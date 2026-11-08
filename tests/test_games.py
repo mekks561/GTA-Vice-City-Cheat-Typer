@@ -129,6 +129,15 @@ class TestTrayModuleStructure(unittest.TestCase):
         self.assertFalse(tray.available)
         tray.close()  # 幂等
 
+    def test_tray_failed_flag_exists_before_thread_runs(self):
+        """1.9.1 回归：主线程轮询会立刻读 _failed，必须先在 __init__ 里初始化。"""
+        import importlib
+        mod = importlib.import_module("vcct.tray")
+        tray = mod.TrayIcon(tooltip="t", emit=lambda a: None)
+        self.assertIn("_failed", tray.__dict__)
+        self.assertFalse(tray._failed)
+        tray.close()  # 幂等
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

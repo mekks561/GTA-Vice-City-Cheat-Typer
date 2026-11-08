@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "1.9.0"
+APP_VER = "1.9.1"
 IS_WIN = os.name == "nt"
 
 

@@ -163,6 +163,37 @@ class TestLoadAndBackup(unittest.TestCase):
         self.assertIsNone(store)
         self.assertIn("更新版本", err)
 
+    def test_history_roundtrip_capped_at_50(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "cheats.json")
+            store = default_store()
+            store["history"] = [{"at": f"t{i}", "name": "n", "code": "AAA",
+                                 "profile": "默认", "result": "ok", "elapsed": 0.12,
+                                 "detail": "d"} for i in range(60)]
+            save_store(store, path)
+            back = load_store(path)
+            self.assertEqual(len(back["history"]), 50)
+            self.assertEqual(back["history"][0]["at"], "t0")
+            self.assertEqual(back["history"][0]["result"], "ok")
+
+    def test_history_dirty_records_dropped(self):
+        out = normalize_store({"history": [None, "x", {"result": "ok",
+                                                       "elapsed": "bad"}]})
+        self.assertEqual(len(out["history"]), 1)
+        self.assertEqual(out["history"][0]["elapsed"], 0.0)
+
+    def test_dirty_records_do_not_consume_history_limit(self):
+        raw = [None, {"result": "ok"}] * 40     # 40 脏 + 40 有效
+        out = normalize_store({"history": raw})["history"]
+        self.assertEqual(len(out), 40, "脏记录不应占用 50 条上限")
+        self.assertTrue(all(h["result"] == "ok" for h in out))
+
+    def test_history_is_v3_only(self):
+        # v1/v2 老配置没有 history → 空列表，不影响其他字段
+        out = normalize_store(V2)
+        self.assertEqual(out["history"], [])
+        self.assertEqual(out["version"], 3)
+
 
 class TestV2Exit(unittest.TestCase):
     def test_to_v2_strips_v3_fields(self):
@@ -173,6 +204,7 @@ class TestV2Exit(unittest.TestCase):
         self.assertEqual(out["version"], 2)
         self.assertNotIn("packs", out)
         self.assertNotIn("verified", out["profiles"][0]["cheats"][0])
+        self.assertNotIn("history", out, "v2 出口不能带 v3 的发送历史")
         self.assertEqual(out["profiles"][0]["cheats"][0]["code"], "THUGSTOOLS")
 
     def test_export_v2_writes_file(self):

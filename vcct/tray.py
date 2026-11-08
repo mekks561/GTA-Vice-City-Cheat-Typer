@@ -98,6 +98,9 @@ class TrayIcon:
         self.is_paused = is_paused
         self.on_error = on_error or (lambda msg: None)
         self.available = False
+        # 必须在启动线程**之前**初始化：主线程下面的轮询会立刻读 _failed，
+        # 若等线程里赋值，几毫秒的竞态就会抛 AttributeError 并让托盘被判为不可用。
+        self._failed = False
         self._nid = None
         self._thread: threading.Thread | None = None
         self._tid = 0
