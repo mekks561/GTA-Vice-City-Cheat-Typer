@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "1.7.1"
+APP_VER = "1.8.0"
 IS_WIN = os.name == "nt"
 
 
@@ -27,6 +27,10 @@ DEFAULT_SETTINGS = {
     "show_toast": True,       # 游戏内悬浮提示（不抢焦点）
     "pause_hotkey": "Ctrl+Alt+P",  # 全局暂停：一键关掉全部秘籍热键（防止在别的窗口误触）
     "debounce_ms": 250,       # 同一秘籍连按去抖（手抖连按两下不该打两遍）
+    # --- 1.8 新增（全部可选：缺省 = 旧行为，v2 配置直接兼容） ---
+    "close_to_tray": True,    # 关闭窗口 = 最小化到托盘；False = 关闭即退出（1.7 及以前的行为）
+    "auto_switch": True,      # 按游戏自动切方案总开关（games 规则表逐条还有自己的 enabled）
+    "onboarded": False,       # 首次启动向导是否已完成/跳过
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢

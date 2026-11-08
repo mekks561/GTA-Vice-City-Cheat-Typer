@@ -104,6 +104,49 @@ def _norm_today(raw) -> dict:
     return {"date": str(raw.get("date") or ""), "count": max(0, _safe_int(raw.get("count"), 0))}
 
 
+# ----------------------------------------------------------------------------
+# 1.8：按游戏自动切方案——games 规则表（纯函数，缺省空 = 旧行为）
+# ----------------------------------------------------------------------------
+def _norm_games(raw) -> list[dict]:
+    """归一化游戏规则表。脏数据逐条丢弃，绝不让一条坏规则毁掉整份配置。"""
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pattern = str(item.get("pattern") or "").strip()
+        if not pattern:
+            continue
+        match_type = str(item.get("match_type") or "exe").strip().lower()
+        if match_type not in ("exe", "title"):
+            match_type = "exe"
+        out.append({
+            "name": str(item.get("name") or pattern),
+            "match_type": match_type,
+            "pattern": pattern,
+            "profile": str(item.get("profile") or "").strip(),
+            "enabled": bool(item.get("enabled", True)),
+        })
+    return out
+
+
+def match_game_rule(rule: dict, title: str, exe: str) -> bool:
+    """单条规则匹配（纯函数）：exe 按进程名、title 按窗口标题，均为大小写不敏感的子串匹配。"""
+    if not rule.get("enabled"):
+        return False
+    hay = (exe if rule.get("match_type") == "exe" else title) or ""
+    return str(rule.get("pattern") or "").lower() in hay.lower()
+
+
+def evaluate_game_rules(games: list[dict], title: str, exe: str) -> dict | None:
+    """返回第一条命中的启用规则；都不命中返回 None（纯函数）。"""
+    for rule in games or []:
+        if match_game_rule(rule, title, exe):
+            return rule
+    return None
+
+
 def touch_today(raw, day: str | None = None, bump: bool = True) -> dict:
     """纯函数：把当日计数推进一天/加一次，返回新字典（便于单测）。"""
     day = day or time.strftime("%Y-%m-%d")
@@ -159,6 +202,7 @@ def normalize_store(raw: dict) -> dict:
         "profiles": profiles,
         "stats": _norm_stats(raw.get("stats")),
         "today": _norm_today(raw.get("today")),
+        "games": _norm_games(raw.get("games")),   # 1.8：可选字段，缺省空 = 不自动切
     }
 
 
@@ -171,6 +215,7 @@ def default_store() -> dict:
         "profiles": [{"name": "默认", "cheats": default_cheats()}],
         "stats": {},
         "today": {"date": "", "count": 0},
+        "games": [],
     }
 
 
@@ -239,6 +284,7 @@ def save_store(store: dict, path: str | None = None) -> None:
         "profiles": store.get("profiles", []),
         "stats": store.get("stats", {}),
         "today": _norm_today(store.get("today")),
+        "games": _norm_games(store.get("games")),
     }
     tmp = path + ".tmp"
     try:
@@ -267,6 +313,7 @@ def bundle_payload(store: dict) -> dict:
         "profiles": store.get("profiles", []),
         "stats": store.get("stats", {}),
         "today": _norm_today(store.get("today")),
+        "games": _norm_games(store.get("games")),
     }
 
 

@@ -42,8 +42,12 @@ class TestGuiSmoke(unittest.TestCase):
             self.assertEqual(app._inflight, "", "初始应为空闲")
             self.assertFalse(app._stop.is_set(), "初始不应处于停止态")
             self.assertGreater(len(app.cheats), 0, "默认秘籍不能为空")
+            self.assertTrue(hasattr(app, "tray"), "1.8 应初始化托盘")
+            self.assertTrue(hasattr(app, "var_tray"), "1.8 应有托盘设置变量")
+            self.assertTrue(hasattr(app, "var_auto_switch"), "1.8 应有自动切换开关")
 
-            app.on_close()
+            # 关窗默认最小化到托盘（1.8），测试里要真正退出需 force
+            app.on_close(force=True)
         finally:
             try:
                 if root is not None:
