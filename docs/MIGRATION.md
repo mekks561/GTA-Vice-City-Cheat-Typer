@@ -38,8 +38,11 @@ v3  { version:3, settings, active_profile, profiles[].{name,cheats,game},
 | `packs[]` | 已安装 .vcpack 记录（名称/作者/游戏/版本/校验/时间） | `[]` |
 | `ui` | 窗口位置 `geometry` + 列宽 `column_widths` | `{}` |
 | `history` | v1.9.1 发送历史：最近 50 次（时间/名称/代码/方案/结果/耗时/说明） | `[]` |
+| `targets` | v2.0 通用目标规则（name/match/require_foreground/ime_policy/strategy_ref/profile_ref） | `[]` |
+| `strategies` | v2.0 具名发送策略表 | `{}` |
 
-`games` 是 1.8 引入的 v2 可选字段，v3 原样保留。
+`games` 是 1.8 引入的 v2 可选字段，v3 原样保留；`targets` 非空时优先于 `games`。
+`settings.hooks_enabled` 默认 `False`（扩展点关闭）。
 
 > v1.9.1 **不升配置版本**：`history` 是 v3 可选字段，缺省空列表；`to_v2()` 会剥离它，因此 `--export-v2` 产物仍可被 1.6/1.7/1.8 读取。旧程序读到 v1.9.1 配置时同样安全忽略 `history`。
 

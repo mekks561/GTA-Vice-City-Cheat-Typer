@@ -45,6 +45,34 @@
 - 键盘全导航（1.9.1）：列表 ↑↓ 选中、`Home`/`End` 跳首尾、`Enter` 发送；所有弹窗 `Esc` 关闭
 - 包管理增强（1.9.1）：导入时自动避让热键冲突、同名包版本/内容变化提示
 - 一键构建（1.9.1）：`build.ps1` 自动跑单测 + ruff + PyInstaller + 生成 SHA256 清单
+- 通用输入平台（2.0）：`vcct.core` 零 tkinter 公共 API、目标规则、发送策略引擎、扩展点、CLI、双产物、离线文档站
+
+## v2.0 更新内容（通用输入平台）
+
+> 定位不是"功能更多"，而是**可被复用**：把 `SendInput + IME 绕行 + 热键总线 + 前台判定` 从"VC 秘籍"业务里剥出来，任何按键类游戏/软件注入文本的场景都能用。**默认配置下行为与 1.9.1 逐项一致**（Gate G2.0）。
+
+| 编号 | 功能 | 说明 |
+|---|---|---|
+| **2.0-A** | `vcct.core` 核心库独立 | 新增 `vcct/core/` 门面包（公共 API）+ `targets` / `strategy` / `hooks` 三个平台无关模块。**兼容式抽库**：既有 `vcct/*.py` 原地保留为实现层，1.7～1.9 的 import、spec、UI 全部不动（规避"抽库演变成重写"风险）；`loggingx` 的崩溃弹窗改为 UI 层注入，实现层彻底零 tkinter；AST 守卫测试检查 core 不 import tkinter / ctypes，`import vcct.core` 不会加载 Win32 DLL |
+| **2.0-B** | 发送策略引擎 | `SendStrategy` 只暴露 5 个参数（kind / interval / hold / pre / retries）：`fixed`（默认，与 1.9.1 参数完全一致、不重试）、`burst`（整串最快）、`adaptive`（丢字自动加长间隔并按剩余字符重试）。秘籍级可指定，具名策略表 `strategies` 可继承，目标规则可 `strategy_ref` 引用 |
+| **2.0-C** | 目标应用规则化 | `Target = {name, match(exe/title/class), require_foreground, ime_policy, strategy_ref, profile_ref}`。配置可选字段 `targets`，非空时优先于 1.8 的 `games`；缺省空 = 旧行为。新增一个目标（记事本/模拟器）只改配置不改代码；设置 → 游戏 可一键从 games 生成 targets |
+| **2.0-D** | 扩展点 | `HookBus` 前置/后置钩子（否决发送、发送后回调），内置"切窗口/回切"与"纯日志"两个示例工厂；**默认关闭**，可在 设置 → 常规 打开。钩子内部抛异常不影响发送 |
+| **2.0-E** | 命令行入口 | `python -m vcct.cli` 或 `VC-Cheat-Typer.exe --cli`：`version` / `list` / `targets` / `strategies` / `pack info` / `send`（**默认只预演，必须 `--execute` 才真正注入**）/ `export-v2` |
+| **2.0-F** | 双产物与升级出口 | onefile（便携）+ onedir（启动快，`build.ps1 -OneDir` 生成 zip + SHA256）；`--export-v2` / 界面导出保留回退路径；v3 配置不变，新增 `targets` / `strategies` / `hooks_enabled` 全部可选 |
+| **2.0-G** | 离线文档站 | `python tools/build_docs.py` 零依赖生成 `docs/site/*.html`（10 页，无外链/JS，双击即可离线打开） |
+| **2.0-H** | 升级验证 | `tests/test_v2_upgrade.py`：从 v1.6 / v1.8 / v1.9 三条真实形态配置升级，验证方案/热键/统计/包/历史零丢失、v2 出口可读、整包往返一致、更高版本禁止回写 |
+
+**架构约束**（写进 `vcct/core/__init__.py`，由测试守住）：core 不得 import tkinter；core 新模块不得直接调 Win32；UI 仍通过实现层调用平台 API。
+
+**CLI 示例**：
+
+```bat
+VC-Cheat-Typer.exe --cli list
+VC-Cheat-Typer.exe --cli targets
+VC-Cheat-Typer.exe --cli send ASPIRINE --target VC        :: 只预演
+VC-Cheat-Typer.exe --cli send ASPIRINE --target VC --execute
+python -m vcct.cli pack info cheats.vcpack
+```
 
 ## v1.9.1 更新内容（补全可选项 + 明显缺陷修复）
 
@@ -300,6 +328,8 @@
 vc-cheats/
 ├── vc_cheat_typer.py  主程序入口（GUI + 自检 + 诊断；逻辑在 vcct/）
 ├── vcct/              核心模块（const/winapi/hotkeys/store/sender/loggingx/tray/packs/importer/templates）
+├── vcct/core/         2.0 通用输入平台（门面 + targets/strategy/hooks，零 tkinter）
+├── vcct/cli.py        2.0 命令行入口
 ├── run.bat            启动器（找 pythonw 后台运行）
 ├── build.ps1          一键构建（单测 + ruff + PyInstaller + SHA256）
 ├── README.md          本文件（中文完整文档）
@@ -310,11 +340,12 @@ vc-cheats/
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
 ├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
 ├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
-├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md  各版执行方案
+├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md  各版执行方案
 ├── docs/PACK-FORMAT.md   .vcpack 秘籍包格式规范
 ├── docs/MIGRATION.md    配置迁移 / 备份 / 回退说明
+├── docs/site/           离线文档站（tools/build_docs.py 生成）
 ├── docs/MACOS-PORT.md    macOS 平台支持方案（需求 1.6，已暂缓）
-├── pyproject.toml     开发期工具配置（ruff；运行时不需要）
+├── tools/build_docs.py  零依赖 md→html 文档站生成器
 ├── tests/             回归测试集（python -m unittest discover -s tests）
 └── README.md          本文件
 ```
