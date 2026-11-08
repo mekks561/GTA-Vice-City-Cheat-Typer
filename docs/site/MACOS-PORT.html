@@ -1,0 +1,237 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MACOS-PORT</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer macOS 平台支持方案</h1>
+<blockquote><strong>状态：已暂缓（2026-11-07）。</strong> 当前精力投入 1.7（输入可靠性 + 工程解耦）。 本文档保留备查：技术结论仍然有效，重启时机建议为 v2.0 平台抽象完成后（见 §八）。<strong>不要按本文档开工。</strong>  对应需求：<strong>1.6（macOS 平台支持）</strong> 基线：v1.6（Windows，commit <code>481d6ff</code>）｜ 文档日期：2026-11-05 关联文档：<code>docs/ROADMAP-1.7-2.0.md</code>（1.7-D 平台抽象是本文档的前置）</blockquote>
+<hr>
+<h2>一、结论先行</h2>
+<p><strong>能做，但不是"重新打包一次"，而是一次平台抽象改造。</strong> macOS 没有 <code>SendInput / RegisterHotKey / ImmAssociateContext</code>，现有代码 <strong>137 处 Win32 调用点</strong>全部需要一个 macOS 等价实现：</p>
+<table><thead><tr><th>Windows 能力</th><th>macOS 等价物</th><th>权限要求</th></tr></thead><tbody>
+<tr><td><code>SendInput</code> + scan code</td><td><strong>CGEventPost</strong>（CoreGraphics），文本走 <code>CGEventKeyboardSetUnicodeString</code>、游戏走物理键码</td><td>辅助功能（Accessibility）</td></tr>
+<tr><td><code>RegisterHotKey</code></td><td><strong>RegisterEventHotKey</strong>（Carbon HIToolbox）</td><td><strong>无需权限</strong>（关键优势）</td></tr>
+<tr><td>前台窗口判定</td><td><code>CGWindowListCopyWindowInfo</code>（取进程名/PID）</td><td>无需权限（窗口标题才需录屏权限，本文档主动避开）</td></tr>
+<tr><td><code>ImmAssociateContext</code>（绕 IME）</td><td>不需要——unicode 事件 + 物理键码本身不受输入法影响</td><td>—</td></tr>
+<tr><td><code>LOCALAPPDATA</code> 回退</td><td><code>~/Library/Application Support/VC-Cheat-Typer/</code></td><td>—</td></tr>
+</tbody></table>
+<p><strong>推荐路线</strong>：单一 Python 代码库 + 平台后端层（<code>vcct/core/platform/{win32,macos}.py</code>），tkinter UI 共用。<strong>不引入 PyObjC 等第三方依赖</strong>，系统框架一律走 ctypes，保持"零运行时依赖"这条资产。</p>
+<hr>
+<h2>二、目标与适用范围</h2>
+<h3>2.1 目标（按优先级）</h3>
+<table><thead><tr><th>编号</th><th>目标</th><th>验收标准</th></tr></thead><tbody>
+<tr><td>G1</td><td>在 Apple Silicon 与 Intel Mac 上均可启动并注入</td><td>M 系列与 x86_64 各一台实机各跑通 5 条秘籍</td></tr>
+<tr><td>G2</td><td>全局热键可用，且<strong>不申请多余权限</strong></td><td>热键注册不触发任何系统授权弹窗；仅注入需要辅助功能</td></tr>
+<tr><td>G3</td><td>安装流程对非技术用户可完成</td><td>从下载到"按 F1 生效"≤ 5 步，文档可照做</td></tr>
+<tr><td>G4</td><td>缺权限时给出可执行的自救指引</td><td>未授权时界面明确提示 + 一键跳转系统设置，而非静默无反应</td></tr>
+<tr><td>G5</td><td>可诊断</td><td><code>--doctor</code> 一条命令输出环境/权限/注入自检报告，可粘贴给维护者</td></tr>
+</tbody></table>
+<h3>2.2 适用范围（<strong>必须先读，决定这个方案对你是否有用</strong>）</h3>
+<table><thead><tr><th>场景</th><th>原生 macOS 版是否适用</th><th>说明</th></tr></thead><tbody>
+<tr><td>GTA VC <strong>决定版</strong>（App Store / Rockstar，原生 macOS）</td><td>✅ 主要目标</td><td>决定版有 macOS 原生版本，是本方案的首要服务对象</td></tr>
+<tr><td>其他<strong>原生运行</strong>的 Mac 游戏 / 模拟器 / 软件</td><td>✅ 适用</td><td>目标规则可配置，不限于 GTA</td></tr>
+<tr><td>游戏跑在 <strong>CrossOver / Whisky / Wine</strong> 里</td><td>⚠️ 大概率适用</td><td>这类游戏本质是 macOS 进程，CGEvent 会送到它的窗口；<strong>需实机验证</strong></td></tr>
+<tr><td>游戏跑在 <strong>Parallels / VMware 虚拟机</strong>里</td><td>⚠️ 部分适用</td><td>HID 层事件通常能透传，但虚拟机常自行接管输入，需实测</td></tr>
+<tr><td><strong>2002 年原版 VC（Mac 移植版）</strong></td><td>❌ 不适用</td><td>32 位应用，macOS 10.15 起已彻底无法运行，与本方案无关</td></tr>
+<tr><td>需要 App Store 上架</td><td>❌ 不可能</td><td>App Sandbox 禁止向其他应用投递事件，这条路直接堵死</td></tr>
+</tbody></table>
+<p><strong>一句话</strong>：如果你在 Mac 上跑的是<strong>决定版</strong>或 Wine 包装的游戏 → 本方案有用；如果你跑的是被 CrossOver 包着的 Windows 原版，<strong>Windows 版 exe + CrossOver 可能比原生 Mac 版更省事</strong>——这点会写进文档，避免用户白折腾。</p>
+<h3>2.3 明确不做（本期）</h3>
+<ul><li>不做 Mac App Store 分发（沙箱冲突，技术上不可行）</li><li>不做<strong>公证（notarization）</strong>：需 Apple Developer Program（$99/年），与"不买证书"的既有决策一致；改为"ad-hoc 签名 + 完整放行指引"（见 §七 风险 R-M4）</li><li>不做 Mac 专属 UI（托盘/向导/自动切方案沿用现有 tk 实现，能跑即可；完整对齐留给 v2.1）</li><li>不做 macOS 12 以下、PowerPC、32 位</li><li>不做内存读写/注入 dylib（法律与反作弊风险，与 Windows 侧一致）</li></ul>
+<hr>
+<h2>三、兼容性要求</h2>
+<h3>3.1 芯片架构</h3>
+<table><thead><tr><th>架构</th><th>支持级别</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>arm64（Apple Silicon，M1–M4）</strong></td><td>一等公民</td><td>主要验证目标；Python 3.11/3.12 universal2</td></tr>
+<tr><td><strong>x86_64（Intel）</strong></td><td>支持</td><td>通过 universal2 单包或独立产物</td></tr>
+<tr><td>Rosetta 2 转译</td><td>可用但不推荐</td><td>转译下 CGEvent 时序略有抖动，丢字率上升，建议用原生 arm64 包</td></tr>
+</tbody></table>
+<p><strong>产物策略</strong>：优先 <strong>universal2 单包</strong>（需 universal2 Python + Tcl/Tk 8.6.12+，python.org 官方安装包已满足）。若 PyInstaller 打 universal2 出现 Tcl/Tk 架构混装问题（常见），退化为<strong>两个独立产物</strong>： <code>VC-Cheat-Typer-macOS-arm64.zip</code> / <code>VC-Cheat-Typer-macOS-x86_64.zip</code>，Release 说明里明确该下哪个。</p>
+<h3>3.2 系统版本</h3>
+<ul><li><strong>最低支持：macOS 12 Monterey</strong></li><li>主要验证：<strong>macOS 13 Ventura / 14 Sonoma / 15 Sequoia / 26 Tahoe</strong></li><li>理由：Monterey 是仍能装 python.org universal2 + Tk 8.6.12 的合理下限；更低版本用户占比极低且 Apple 已停止安全更新。</li><li><strong>Tk 版本要求 ≥ 8.6.12</strong>：更早的 Tk 8.6 在 Retina 上是位图拉伸（模糊），与 Windows 侧 1.6 做的高 DPI 适配是同一类问题。</li></ul>
+<h3>3.3 依赖</h3>
+<table><thead><tr><th>类别</th><th>内容</th><th>说明</th></tr></thead><tbody>
+<tr><td>运行依赖</td><td><strong>零第三方包</strong></td><td>仅 stdlib + tkinter + ctypes 调系统框架</td></tr>
+<tr><td>系统框架</td><td>CoreGraphics、CoreFoundation、ApplicationServices、Carbon(HIToolbox)</td><td>均为系统自带，通过 ctypes 加载，不打包、不下载</td></tr>
+<tr><td>Python（源码运行）</td><td>3.10+，<strong>必须含 tkinter</strong></td><td>Homebrew 的 python 默认<strong>不含</strong> tkinter，需 <code>brew install python-tk</code>；推荐 python.org 官方包</td></tr>
+<tr><td>构建依赖</td><td>PyInstaller ≥ 6.x、<code>codesign</code>（Xcode CLT）</td><td>仅打包机需要</td></tr>
+</tbody></table>
+<h3>3.4 权限矩阵（核心）</h3>
+<table><thead><tr><th>权限</th><th>是否必需</th><th>触发时机</th><th>用户路径</th></tr></thead><tbody>
+<tr><td><strong>辅助功能 Accessibility</strong></td><td>✅ <strong>必需</strong>（唯一硬权限）</td><td>首次注入前检测 <code>AXIsProcessTrusted()</code></td><td>系统设置 → 隐私与安全性 → 辅助功能 → 勾选 VC-Cheat-Typer</td></tr>
+<tr><td>输入监控 Input Monitoring</td><td>❌ 不需要</td><td>—</td><td>采用 RegisterEventHotKey 而非 CGEventTap 监听，正是为了避开它</td></tr>
+<tr><td>屏幕录制</td><td>❌ 不需要</td><td>—</td><td>只取进程名/PID，不读窗口标题</td></tr>
+<tr><td>通知</td><td>⚠️ 可选</td><td>开启"发送成功提示"时</td><td>首次弹系统询问</td></tr>
+<tr><td>完全磁盘访问 / 自动化</td><td>❌ 不需要</td><td>—</td><td>—</td></tr>
+</tbody></table>
+<p><strong>设计要点</strong>：只有一项硬权限，且<strong>热键本身不需要权限</strong>——这决定了首次启动可以"先让用户看到界面、先试用热键"，只在真正注入时才引导授权，心理门槛低得多。</p>
+<hr>
+<h2>四、技术方案</h2>
+<h3>4.1 平台抽象层（前置改造）</h3>
+<p>1.7-D 已规划把单文件拆成 <code>vcct/</code>。本方案要求把它进一步分为：</p>
+<pre><code>vcct/
+├── core/
+│   ├── platform/
+│   │   ├── base.py      Backend 抽象：send_text / send_key / register_hotkeys / frontmost / app_paths / doctor
+│   │   ├── win32.py     现有 137 处 Win32 调用整体搬家（行为零变更）
+│   │   ├── macos.py     本文档新增实现
+│   │   └── null.py      无后端（CI/无桌面环境跑纯逻辑测试用）
+│   ├── sender.py        与平台无关：策略、队列、取消、日志
+│   ├── hotkeys.py       与平台无关：组合键解析、冲突检测、候选键
+│   └── store.py         与平台无关：v3 schema、迁移、路径通过 backend.app_paths()
+└── ui/                  tkinter 共用；仅字体/菜单/快捷键文案做平台分支</code></pre>
+<p><strong>硬约束</strong>：<code>sender.py</code> / <code>hotkeys.py</code> / <code>store.py</code> 不得直接 import <code>ctypes</code> 或任何 Win32/macOS 符号。这条约束同时也是 2.0"core 抽库"的验收条件——<strong>macOS 支持本身就是平台抽象是否成功的唯一硬证据</strong>。</p>
+<p>预计需要新增/改造：<code>base.py</code> 约 120 行、<code>macos.py</code> 约 700–900 行、<code>win32.py</code> 为纯搬运。</p>
+<h3>4.2 按键注入</h3>
+<p>macOS 无 <code>SendInput</code>，用 <strong>CGEventPost</strong>，分两条路径：</p>
+<table><thead><tr><th>用途</th><th>做法</th><th>理由</th></tr></thead><tbody>
+<tr><td><strong>文本注入</strong>（记事本/聊天/模拟器）</td><td><code>CGEventCreateKeyboardEvent(source, 0, True)</code> + <code>CGEventKeyboardSetUnicodeString</code> 写入整串，再 post</td><td>不依赖键码表与输入法，任意 Unicode 一条事件搞定；等价于 Windows 侧绕开 IME 的效果</td></tr>
+<tr><td><strong>游戏注入</strong>（决定版等）</td><td>逐字符生成 <strong>物理键码</strong>（<code>kVK_ANSI_A=0x00</code> … <code>kVK_ANSI_0=0x1D</code>），keyDown/keyUp 各一条，中间按 <code>key_hold_ms</code> 延时</td><td>游戏按帧轮询键盘状态，必须有独立的按下/抬起事件与足够 hold；物理键码不受输入法/键盘布局影响</td></tr>
+</tbody></table>
+<p>统一走 <code>kCGHIDEventTap(0)</code>（进程能触达的最低层事件），事件源用 <code>CGEventSourceCreate(kCGEventSourceStateHIDSystemState)</code>。</p>
+<p><strong>能力边界（必须写进 README）</strong>：CGEvent 无法骗过使用 <strong>raw HID / IOHIDManager 独占读取</strong>的游戏。这类游戏只能靠外接硬件或系统级驱动，与本方案同类限制也存在于 Windows（DirectInput 部分场景）。决定版是否属于此类 <strong>需实机验证</strong>，验证不通过则在兼容性矩阵中标注。</p>
+<p><strong>丢字处理</strong>：macOS 事件队列在高负载/低帧率下同样会丢。沿用 Windows 侧的"逐字符间隔 + hold"模型，默认值建议 <strong>60ms 间隔 / 30ms hold</strong>（比 Windows 的 45/25 略保守），并保留"决定版"预设。</p>
+<h3>4.3 全局热键</h3>
+<p><strong>方案 A（推荐）</strong>：<code>RegisterEventHotKey</code>（Carbon HIToolbox）</p>
+<ul><li>无需任何权限，且天然支持"其他应用前台时触发"</li><li>需要事件循环：起一个专用线程 + <code>CFRunLoopRun()</code>，通过 <code>InstallEventHandler</code> 挂到 <code>GetEventDispatcherTarget()</code> 接收 <code>kEventHotKeyPressed</code></li><li><strong>注意常量陷阱</strong>：<code>RegisterEventHotKey</code> 的修饰键掩码与 CGEventFlags <strong>完全不同</strong></li></ul>
+<p>（<code>cmdKey=1&lt;&lt;8</code>、<code>shiftKey=1&lt;&lt;9</code>、<code>optionKey=1&lt;&lt;11</code>、<code>controlKey=1&lt;&lt;12</code>），不可复用 CGEvent 的 <code>kCGEventFlagMask*</code></p>
+<ul><li>冲突检测：注册失败返回 <code>eventHotKeyExistsErr(-9878)</code>，语义等价于 Windows 的 <code>1409</code>，复用现有冲突提示与候选键分配逻辑</li></ul>
+<p><strong>方案 B（退路）</strong>：<code>CGEventTap</code> 监听全局按键。需 Input Monitoring 或辅助功能权限，且要自己维护按键状态机、还要处理"不吞掉游戏按键"——复杂度与权限成本都更高，仅当 A 在目标系统版本上出现兼容问题时启用。</p>
+<p><strong>macOS 特有的按键冲突</strong>（必须在 UI 里提示）：</p>
+<ul><li>默认绑定 F1–F11，但 Mac 键盘的 F1/F2 默认是<strong>亮度</strong>、F3 是调度中心 → 用户需在 系统设置 → 键盘 里开启「<strong>将 F1、F2 等键用作标准功能键</strong>」，否则按 F1 只会调亮度</li><li>程序可读 <code>defaults read -g com.apple.keyboard.fnState</code>（1 = 已开启），未开启时在启动提示里给一键跳转</li><li><code>Cmd+Space</code>、<code>Cmd+Tab</code>、<code>Ctrl+↑</code> 等被系统占用，<code>is_safe_binding</code> 需增加一份 macOS 保留键黑名单</li></ul>
+<p><strong>组合键语义映射</strong>（避免用户困惑）：</p>
+<table><thead><tr><th>Windows 习惯</th><th>macOS 对应</th><th>说明</th></tr></thead><tbody>
+<tr><td>Ctrl</td><td><strong>Control</strong></td><td>一对一保留</td></tr>
+<tr><td>Alt</td><td><strong>Option</strong></td><td>一对一保留</td></tr>
+<tr><td>Win 键</td><td><strong>Command</strong></td><td>语义最接近（系统级修饰键）</td></tr>
+</tbody></table>
+<p>界面在 macOS 上直接显示 <code>⌃⌥P</code> 这类符号，同时设置页提供"显示为文字"选项。</p>
+<h3>4.4 前台与目标识别</h3>
+<p><code>CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements)</code> 取第一层（<code>kCGWindowLayer == 0</code>）窗口的 <code>kCGWindowOwnerName</code>（应用名）与 <code>kCGWindowOwnerPID</code>。</p>
+<ul><li><strong>不读 <code>kCGWindowName</code></strong>（窗口标题）——macOS 10.15 起该字段需屏幕录制权限，读了等于强制用户多授一项权限，不划算</li><li>目标匹配规则改为按 <strong>应用名 / bundle id / 进程名</strong> 匹配（Windows 侧原有的"标题关键字"在 mac 上降级为可选，需用户显式开启）</li><li>复用现有 3s 轮询节流；macOS 上改为 1.5s（CGWindowList 开销远低于 EnumWindows），但发送期间暂停轮询</li></ul>
+<h3>4.5 数据与路径</h3>
+<table><thead><tr><th>项</th><th>Windows</th><th>macOS</th></tr></thead><tbody>
+<tr><td>配置目录</td><td>exe 同目录（可写时）否则 <code>%LOCALAPPDATA%</code></td><td><strong><code>~/Library/Application Support/VC-Cheat-Typer/</code></strong>（首选，不写 <code>.app</code> 内部）</td></tr>
+<tr><td>日志</td><td><code>logs/app.log</code></td><td><code>~/Library/Logs/VC-Cheat-Typer/app.log</code>（符合 mac 惯例，Console.app 可见）</td></tr>
+<tr><td>备份/隔离文件</td><td>同目录</td><td>配置目录内，命名规则不变</td></tr>
+</tbody></table>
+<p><strong>为什么不写 <code>.app</code> 旁边</strong>：<code>.app</code> 是只读签名的包；且未公证应用从"下载"目录首次启动会触发 <strong>App Translocation（路径随机化）</strong>，程序实际运行在一个随机只读路径下，写配置必失败。这是 macOS 移植最经典的坑，必须在代码层规避（统一走 <code>Application Support</code>），而不是靠文档提醒用户。</p>
+<h3>4.6 UI 差异（最小改动）</h3>
+<table><thead><tr><th>项</th><th>处理</th></tr></thead><tbody>
+<tr><td>字体</td><td>用 <code>SF Pro Text</code> / <code>Helvetica Neue</code> 替代 <code>Microsoft YaHei UI</code>；中文自动回落 PingFang SC</td></tr>
+<tr><td>菜单栏</td><td>补一个最小 App 菜单（关于/退出 <code>Cmd+Q</code>/设置 <code>Cmd+,</code>），否则 tk 应用在 Mac 上菜单栏是空的，很怪</td></tr>
+<tr><td>窗口关闭</td><td>默认"关闭 = 隐藏到 Dock"（mac 习惯），退出走 <code>Cmd+Q</code></td></tr>
+<tr><td>DPI</td><td>macOS 是逻辑点 + Retina 自动缩放，不需要 Windows 那套 DPI 感知；但需 <code>NSHighResolutionCapable=true</code> 才能拿清晰渲染</td></tr>
+<tr><td>右键菜单</td><td>保持；补充 <code>Ctrl+Click</code> 等价（tk 在 mac 上已映射）</td></tr>
+<tr><td>快捷键文案</td><td><code>Ctrl+F</code> → <code>Cmd+F</code> 等按平台替换</td></tr>
+</tbody></table>
+<h3>4.7 打包与签名</h3>
+<pre><code># 构建 .app（--windowed 在 mac 上等价于 --osx-bundle-identifier + BUNDLE）
+pyinstaller --windowed --name VC-Cheat-Typer \
+  --osx-bundle-identifier com.mekks561.vcct \
+  --icon assets/icon.icns vc_cheat_typer.py
+
+# ad-hoc 签名（无证书，仅让 Gatekeeper 认为&quot;结构完整&quot;）
+codesign --force --deep --sign - &quot;dist/VC-Cheat-Typer.app&quot;</code></pre>
+<p><code>Info.plist</code> 需显式包含：<code>NSHighResolutionCapable=true</code>、<code>LSMinimumSystemVersion=12.0</code>、<code>CFBundleIdentifier</code>（<strong>必须固定</strong>，TCC 授权按 bundle id + 签名记录，改了就要重新授权）。</p>
+<hr>
+<h2>五、安装与首次启动流程</h2>
+<p>目标：<strong>5 步内从下载到"按 F1 生效"</strong>，且每一步失败都有明确下一步。</p>
+<table><thead><tr><th>步骤</th><th>用户动作</th><th>程序行为</th><th>失败时的引导</th></tr></thead><tbody>
+<tr><td>1</td><td>下载 <code>VC-Cheat-Typer-macOS-universal2.zip</code>，解压</td><td>—</td><td>若提示"无法打开，因为 Apple 无法检查…"→ 见 §七 Q1</td></tr>
+<tr><td>2</td><td><strong>拖到「应用程序」文件夹</strong>（关键）</td><td>首次启动检测自身路径是否含 <code>/AppTranslocation/</code> 或位于下载目录 → 提示"请先移到「应用程序」"</td><td>检测到 Translocation 时直接弹提示并给"打开应用程序文件夹"按钮</td></tr>
+<tr><td>3</td><td>右键 → <strong>打开</strong> → 确认打开</td><td>正常启动，创建 <code>~/Library/Application Support/VC-Cheat-Typer/</code></td><td>—</td></tr>
+<tr><td>4</td><td>看到首屏提示"需要辅助功能权限才能注入" → 点「去授权」</td><td><code>AXIsProcessTrusted()</code> 为假时显示；按钮执行 <code>open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"</code></td><td>授权后回来点「我已授权」→ 程序复查并立即生效（无需重启）</td></tr>
+<tr><td>5</td><td>点「注入自检」→ 在弹出窗口按 F1</td><td>用原生 tk 输入框做探针（mac 上事件投递到自身窗口同样受 AX 约束，能真实反映权限状态）</td><td>自检失败 → 输出 <code>--doctor</code> 报告</td></tr>
+</tbody></table>
+<p><strong>首次启动还会做三件事</strong>（沿用 Windows 侧向导思路）：① 检测 <code>com.apple.keyboard.fnState</code>，未开标准功能键则提示；② 检测 F1–F11 是否被系统/其他软件占用并列出；③ 询问是否复制一份预置方案（VC 决定版 / 通用）。</p>
+<p><strong>卸载</strong>：删除 <code>.app</code> + 删除 <code>~/Library/Application Support/VC-Cheat-Typer</code>，并在系统设置里移除辅助功能条目（程序内提供「打开授权设置」入口，卸载说明附在 README）。</p>
+<hr>
+<h2>六、运行验证</h2>
+<h3>6.1 <code>--doctor</code> 自检（新增，跨平台统一入口）</h3>
+<p>一条命令输出可粘贴的诊断报告：</p>
+<pre><code>VC-Cheat-Typer 2.0.0 (darwin)
+OS          : macOS 14.6.1 (23G93) / arm64
+Python      : 3.12.4 / Tk 8.6.13 (aqua)
+Bundle      : com.mekks561.vcct
+Path        : /Applications/VC-Cheat-Typer.app  (translocation: no)
+Data dir    : ~/Library/Application Support/VC-Cheat-Typer  (writable: yes)
+Accessibility: GRANTED
+Standard Fn keys: ON
+Frontmost   : Finder (com.apple.finder)
+Hotkeys     : 28 registered, 0 conflict
+Injection   : unicode probe OK (0.42s), keycode probe OK (0.38s)
+Log         : ~/Library/Logs/VC-Cheat-Typer/app.log</code></pre>
+<h3>6.2 自动化验证（可进 CI 的部分）</h3>
+<table><thead><tr><th>检查</th><th>能否在 GitHub Actions macOS runner 上跑</th><th>说明</th></tr></thead><tbody>
+<tr><td>纯逻辑（store/迁移/组合键解析/候选键）</td><td>✅</td><td><code>macos-14</code>(arm64) + <code>macos-13</code>(x86_64) 双架构矩阵</td></tr>
+<tr><td><code>import vcct.core</code> 不依赖 tkinter</td><td>✅</td><td>用 <code>sys.modules</code> 断言</td></tr>
+<tr><td><code>--doctor --no-gui</code> 环境探测</td><td>✅</td><td>权限必然是 NOT GRANTED，只断言"能正确报告未授权"</td></tr>
+<tr><td>GUI 建窗</td><td>⚠️ 不稳定</td><td>runner 无交互会话，Tk 可能失败 → <code>continue-on-error</code></td></tr>
+<tr><td><strong>真实注入 / 热键</strong></td><td>❌</td><td>需要 TCC 授权与交互会话，<strong>只能人工实机</strong></td></tr>
+</tbody></table>
+<h3>6.3 人工实机验证清单（发布门槛）</h3>
+<p>必须在 <strong>M 系列 + Intel 各一台</strong>上全部通过：</p>
+<ol><li>未授权状态下点「注入自检」→ 明确提示缺权限，且给出可点击的设置入口（不得静默失败）</li><li>授权后（不重启程序）→ 自检立即通过</li><li>在 TextEdit 里按热键 → 完整输出秘籍文本，无丢字、无大小写错乱</li><li>在游戏（VC 决定版）内按 F1 → 满血；F8 → 坦克；连续 5 条秘籍全中</li><li>按暂停键 <code>⌃⌥P</code> → 在 TextEdit 按 F1 <strong>零注入</strong>；再按一次恢复生效</li><li>连按两个不同秘籍热键 → 只出现完整一条，无交错（验证 1.7-B 单飞在 mac 侧成立）</li><li>中文/日文输入法激活状态下注入 → 仍然正确（unicode 事件路径）</li><li>从「下载」直接双击（不移动）→ 程序提示"请移到应用程序文件夹"而非静默写配置失败</li><li>重启系统后 → 授权仍在、热键仍生效</li><li>换一个 macOS 大版本（如 13 → 15）→ 无布局错乱</li></ol>
+<hr>
+<h2>七、常见问题与应对</h2>
+<table><thead><tr><th>#</th><th>现象</th><th>原因</th><th>处置</th></tr></thead><tbody>
+<tr><td>Q1</td><td>提示"<strong>已损坏，无法打开</strong>"或"Apple 无法检查是否包含恶意软件"</td><td>未公证 + 浏览器加了 quarantine 隔离属性</td><td>① 右键 →「打开」→「打开」；Sonoma 起若被拦：系统设置 → 隐私与安全性 → 点「仍要打开」；② 或终端执行 <code>xattr -dr com.apple.quarantine "/Applications/VC-Cheat-Typer.app"</code></td></tr>
+<tr><td>Q2</td><td>双击后<strong>没有任何反应</strong>，Dock 也没图标</td><td>App Translocation 或签名损坏</td><td>先移到「应用程序」；仍无反应看 <code>~/Library/Logs/VC-Cheat-Typer/app.log</code> 与 Console.app；<code>codesign -dv --verbose=2</code> 查签名</td></tr>
+<tr><td>Q3</td><td>按热键<strong>完全没反应</strong>（程序在运行）</td><td>辅助功能未授权；或授权后程序被替换导致签名变化</td><td>系统设置 → 隐私与安全性 → 辅助功能：<strong>先删除旧条目</strong>，再重新添加当前 <code>.app</code>（同 bundle id 换签名会保留旧记录，这是最常见的"已勾选却不生效"）</td></tr>
+<tr><td>Q4</td><td>按 F1 屏幕只是<strong>变暗/变亮</strong></td><td>Mac 键盘 F1/F2 默认是亮度键</td><td>系统设置 → 键盘 → 勾选「将 F1、F2 等键用作标准功能键」；程序启动时会检测并提示</td></tr>
+<tr><td>Q5</td><td>热键在别的应用里生效，<strong>进游戏就失效</strong></td><td>游戏为独占全屏且接管输入；或使用 raw HID 读取</td><td>改窗口化/无边框窗口；若是 raw HID 类游戏，CGEvent 无法穿透，属方案边界（见 §4.2）</td></tr>
+<tr><td>Q6</td><td>发送<strong>丢字 / 顺序错乱</strong></td><td>间隔过短；游戏帧率低；Rosetta 下时序抖动</td><td>把间隔提到 80–100ms、hold 到 40ms；确认使用 arm64 原生包而非 Rosetta</td></tr>
+<tr><td>Q7</td><td>中文输入法激活时注入成乱码/被吞</td><td>走了键码路径</td><td>文本场景走 unicode 事件路径（默认已如此）；确认 <code>disable_ime</code> 等价项在 mac 上走 unicode 分支</td></tr>
+<tr><td>Q8</td><td>配置<strong>不保存</strong>，每次启动都回到默认</td><td>从下载目录直接运行（Translocation）→ 只读路径；或 <code>.app</code> 内相对路径不可写</td><td>移到「应用程序」；确认数据目录为 <code>~/Library/Application Support/VC-Cheat-Typer</code>；<code>--doctor</code> 会显示 <code>writable</code></td></tr>
+<tr><td>Q9</td><td>每次重新构建后都要<strong>重新授权</strong></td><td>ad-hoc 签名的签名值随构建变化，TCC 视为不同应用</td><td>开发期可接受；发布版固定产物不重建即可；长期解法是正式证书签名（见 R-M4）</td></tr>
+<tr><td>Q10</td><td>程序在 Dock 里但<strong>窗口找不到</strong></td><td>窗口被移出屏幕（多显示器变更）</td><td>菜单「窗口 → 居中」；程序启动时校验窗口位置是否在任一屏幕内，否则自动居中</td></tr>
+<tr><td>Q11</td><td>Intel Mac 上启动报"<strong>无法打开，因为不受支持</strong>"</td><td>下成了 arm64 单架构包</td><td>按 Release 说明下载 x86_64 包或 universal2 包；<code>uname -m</code> 自查</td></tr>
+<tr><td>Q12</td><td>全屏游戏里<strong>看不到提示浮层</strong></td><td>独占全屏无法叠加窗口</td><td>改为无边框窗口化；或关闭浮层（本就非必需）</td></tr>
+</tbody></table>
+<hr>
+<h2>八、落地路径与版本归属</h2>
+<p><strong>前置</strong>：必须等 <strong>1.7-D（拆包）</strong> 完成。在 2900 行单文件上直接加 macOS 分支，等于给两个平台同时埋雷。</p>
+<p><strong>建议归属</strong>：作为 <strong>v2.0 的第二个交付目标</strong>（与 core 抽库并行）——</p>
+<p>理由：2.0 的核心命题是"输入引擎可被复用"，而<strong>第二个平台的真实实现是检验这个抽象是否成立的唯一硬证据</strong>。如果 macOS 后端能只写 <code>platform/macos.py</code> 就接上，说明抽象成功；如果被迫改 <code>sender.py</code>，说明抽象失败，应当立即返工而不是硬推。</p>
+<table><thead><tr><th>任务</th><th>内容</th><th>估时</th></tr></thead><tbody>
+<tr><td>M-01</td><td><code>platform/base.py</code> 接口 + <code>win32.py</code> 纯搬运 + <code>null.py</code></td><td>2.0d</td></tr>
+<tr><td>M-02</td><td><code>macos.py</code>：CGEvent 注入（unicode + 键码双路径）、hold/间隔</td><td>2.0d</td></tr>
+<tr><td>M-03</td><td>全局热键（RegisterEventHotKey + CFRunLoop 线程 + 冲突检测）</td><td>2.0d</td></tr>
+<tr><td>M-04</td><td>前台/目标识别（CGWindowList，仅进程维度）+ 保留键黑名单</td><td>1.0d</td></tr>
+<tr><td>M-05</td><td>路径与日志迁移、Translocation 检测、权限引导 UI</td><td>1.0d</td></tr>
+<tr><td>M-06</td><td><code>--doctor</code> + 权限状态呈现 + fnState 检测</td><td>1.0d</td></tr>
+<tr><td>M-07</td><td>打包 universal2/双产物、ad-hoc 签名、Info.plist</td><td>1.5d</td></tr>
+<tr><td>M-08</td><td>文档（安装/FAQ/兼容性矩阵）+ 双架构实机验证</td><td>1.5d</td></tr>
+</tbody></table>
+<p>合计 <strong>12 人日</strong>（≈ 24 自然日 @ 2h/天）。若 2.0 已因排期紧张，可整体降级为 <strong>v2.1</strong>，把 2.0 的 17 人日守住；<strong>不建议把 macOS 塞进 1.8/1.9</strong> —— 那两个版本的改动集中在 UI 与数据层，混入平台层会让回归面失控。</p>
+<hr>
+<h2>九、风险登记</h2>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解</th></tr></thead><tbody>
+<tr><td>R-M1</td><td><strong>CGEvent 对目标游戏无效</strong>（raw HID / 反作弊 / 独占全屏）</td><td>中 / <strong>高</strong></td><td>第 1 周就先做注入可行性验证（只写 100 行探针，跑通决定版再投入其余 11 人日）；不通过则本方案只对"原生窗口应用/模拟器"承诺</td></tr>
+<tr><td>R-M2</td><td>PyInstaller universal2 打包时 Tcl/Tk 架构冲突</td><td>高 / 中</td><td>退化为双架构独立产物；CI 里对两个 runner 各自打包，不在单机拼 universal2</td></tr>
+<tr><td>R-M3</td><td>TCC 授权"已勾选但不生效"（签名变化/条目残留）</td><td>高 / 中</td><td>文档给"删除旧条目再添加"的标准动作；程序内检测到"授权为真但注入自检失败"时直接提示这一条</td></tr>
+<tr><td>R-M4</td><td>未公证带来的安装摩擦劝退用户</td><td><strong>高</strong> / 中</td><td>短期：完整放行指引 + 首启检测 + 一键去隔离命令；中期：若下载量证明有真实需求，再评估 $99 公证（这也是与 Windows 侧决策的差异点：Windows 只是 SmartScreen 警告，macOS 是硬拦截）</td></tr>
+<tr><td>R-M5</td><td>平台抽象被 macOS 需求反推着改坏 Windows 行为</td><td>中 / <strong>高</strong></td><td>每次改 <code>base.py</code> 必须同时跑 Windows 全量回归（单测 + selftest + GUI 21 项）；CI 增加 macOS 逻辑层矩阵，但不允许 mac 侧改动绕过 win 侧测试</td></tr>
+<tr><td>R-M6</td><td>macOS 上 tkinter 观感与 Windows 差距大，被认为"半成品"</td><td>中 / 低</td><td>明确 MVP 定义：功能可用优先，UI 对齐留给 v2.1；README 如实说明</td></tr>
+<tr><td>R-M7</td><td>用户在 Mac 上其实该用 CrossOver 跑 Windows 版，白折腾</td><td>中 / 中</td><td>§2.2 的判断表放在 README 最前面，先劝退错误路径</td></tr>
+</tbody></table>
+<hr>
+<h2>十、一句话总结</h2>
+<p><strong>macOS 支持不是"再打一个包"，而是把 137 处 Win32 调用换成一个可插拔后端</strong>：注入换 CGEvent（文本走 unicode、游戏走物理键码）、热键换 RegisterEventHotKey（唯一不需要权限的方案）、前台判定换 CGWindowList（只取进程维度以避开录屏权限）、配置必须搬进 <code>Application Support</code>（躲开 Translocation）。</p>
+<p>真正的风险只有一个：<strong>CGEvent 能不能打进目标游戏</strong>。所以第一步不是写 700 行 <code>macos.py</code>，而是写 100 行探针先在决定版里打出三个字符——打不进去，后面 11 人日都是白做。</p></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PLAN-1.8</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>1.8 执行方案（已完成）</h1>
+<blockquote>基线：v1.7.1（commit <code>d55285b</code>）｜依据：<code>docs/ROADMAP-1.7-2.0.md</code> 第三章 状态：<strong>全部 P0 已实现并发布</strong></blockquote>
+<h2>任务与实现落点</h2>
+<table><thead><tr><th>编号</th><th>任务</th><th>落点</th></tr></thead><tbody>
+<tr><td>1.8-A</td><td>托盘常驻</td><td><code>vcct/tray.py</code>（Shell_NotifyIconW + 独立消息线程 + TaskbarCreated 重注册）；<code>CheatApp.on_close(force=False)</code> 默认缩托盘，<code>_on_unmap</code> 拦最小化；设置 <code>close_to_tray</code> 可改回旧行为</td></tr>
+<tr><td>1.8-B</td><td>按游戏自动切方案</td><td><code>vcct/store.py</code>：<code>_norm_games</code> / <code>match_game_rule</code> / <code>evaluate_game_rules</code> 纯函数，<code>games</code> 规则表进配置（v2 兼容可选字段）；<code>CheatApp._auto_switch_tick</code> 挂在 3s 轮询里，800ms 防抖、发送中不切、规则指向不存在方案只警告一次</td></tr>
+<tr><td>1.8-C</td><td>首次启动向导</td><td><code>OnboardWizard</code>：选预设（可勾选添加 gta-vc 自动切换规则）→ 注入自检（raw_char_probe）→ 冲突检测/一键分配；完成或跳过写 <code>settings.onboarded</code>；<code>Ctrl+F1</code> 重开</td></tr>
+<tr><td>1.8-D</td><td>设置对话框</td><td><code>SettingsDialog</code> 四页（常规/输入/游戏/数据）+ <code>GameRuleDialog</code>；Tk 变量抽到 <code>CheatApp._make_vars()</code> 与控件解耦；主界面只留方案切换/搜索/分组/发送/列表/日志</td></tr>
+<tr><td>1.8-E</td><td>热键总览</td><td><code>HotkeyOverview</code>：全部热键 + 占用状态 + 所属方案，冲突红标、未注册灰显；重新检测占用；导出文本</td></tr>
+<tr><td>1.8-F</td><td>测试与文档</td><td><code>tests/test_games.py</code>（10 条）+ 冒烟断言更新；README 重写快速上手 + v1.8 章节</td></tr>
+</tbody></table>
+<h2>关键实现决策</h2>
+<ol><li><strong>托盘独立线程 + Win32 消息窗</strong>：tkinter 的窗口/消息泵不能被第二线程碰，托盘用裸 ctypes 建隐藏窗口自跑 <code>GetMessage</code> 循环；回调经 <code>app.events</code> 队列投回主线程，托盘线程零 tkinter 依赖（AST 测试守住）。</li><li><strong>64 位 ctypes 签名</strong>：<code>DefWindowProcW/PostMessageW</code> 必须显式声明 argtypes，否则 lparam 大值 OverflowError（实测踩到）。</li><li><strong>on_close 语义变更</strong>：默认最小化到托盘；托盘不可用或 <code>force=True</code>（托盘退出、提权重启、selftest）才真正退出——selftest 与冒烟测试同步更新。</li><li><strong>games 规则匹配窗口选择</strong>：对<strong>前台窗口</strong>（标题+进程）匹配而非仅 find_game_window 的游戏窗口——规则表是通用场景开关（将来可加别的游戏），且"切回桌面不误切"由"离开前台即停止匹配"保证。</li><li><strong>配置只升不降</strong>：新字段全部可选、缺省=旧行为；<code>save_store</code> 白名单同步收录 <code>games</code>，旧版程序读到 v1.8 配置会忽略 games 字段，不报错。</li></ol>
+<h2>验证</h2>
+<ul><li>单测：89 条（1.7 的 79 + 1.8 的 10）全过；ruff（主文件）0 告警</li><li><code>--selftest</code> 全部通过（含 GUI 冒烟 + 真实注入探针 + 热键冲突返回码 1409）</li><li>真机待验证清单：托盘右键三项、Explorer 重启图标恢复、gta-vc 前台自动切方案、向导三步、设置四页逐项、热键总览导出</li></ul></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

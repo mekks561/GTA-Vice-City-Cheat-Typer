@@ -6,6 +6,7 @@
 #   .\build.ps1 -SkipVerify
 #   .\build.ps1 -SyncFromTag
 #   .\build.ps1 -Python "...\Python310\python.exe" -RuffPython "...\python.exe"
+#   .\build.ps1 -OneDir          # also build the onedir distribution (+ zip)
 #
 # By default this script NEVER modifies source files. -SyncFromTag is opt-in.
 # unittest/PyInstaller need a Python WITH tkinter; ruff may be in another
@@ -17,7 +18,8 @@ param(
     [string]$Python = "python",
     [string]$RuffPython = "python",
     [switch]$SkipVerify,
-    [switch]$SyncFromTag
+    [switch]$SyncFromTag,
+    [switch]$OneDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +92,23 @@ try {
     Write-Host "OK  dist\VC-Cheat-Typer.exe  ($size bytes)" -ForegroundColor Green
     Write-Host "    SHA256 $hash" -ForegroundColor Green
     Write-Host "    $shaPath" -ForegroundColor Green
+
+    if ($OneDir) {
+        Write-Host "[4/4] onedir distribution (2.0-F)..." -ForegroundColor Gray
+        & $Python -m PyInstaller VC-Cheat-Typer-onedir.spec --noconfirm
+        if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onedir) failed" }
+        $oneDirPath = Join-Path $distDir "VC-Cheat-Typer-onedir"
+        if (-not (Test-Path -LiteralPath $oneDirPath)) { throw "onedir output missing" }
+        $zipPath = Join-Path $distDir ("VC-Cheat-Typer-onedir-" + $version + ".zip")
+        Compress-Archive -LiteralPath $oneDirPath -DestinationPath $zipPath -Force
+        $zHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $zShaPath = $zipPath + ".sha256.txt"
+        [IO.File]::WriteAllText($zShaPath, "$zHash *" + (Split-Path -Leaf $zipPath) + "`n",
+                                (New-Object Text.UTF8Encoding($false)))
+        Write-Host "OK  $zipPath" -ForegroundColor Green
+        Write-Host "    SHA256 $zHash" -ForegroundColor Green
+    }
+
     Write-Host ""
     Write-Host "Verify with Git Bash:  sha256sum -c dist/VC-Cheat-Typer-SHA256.txt" -ForegroundColor Gray
 } finally {

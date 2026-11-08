@@ -21,6 +21,9 @@ logs/
 build/
 dist/
 *.spec
+# 但两个发布用的 spec 必须随仓库分发
+!VC-Cheat-Typer.spec
+!VC-Cheat-Typer-onedir.spec
 
 # 临时文件
 _scratch_*

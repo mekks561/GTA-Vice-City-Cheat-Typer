@@ -1,0 +1,151 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ROADMAP-1.6</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer 1.6 版本规划</h1>
+<blockquote>基线：v1.5（commit b1ba6c4）｜ 规划日期：2026-11-04 ｜ 目标发布：2026-11-20（周五） 文档性质：执行用规划，任务可直接拆为 issue / 提交</blockquote>
+<p><strong>执行状态（随进度更新）</strong></p>
+<ul><li>✅ M0 + M1（P0-A~E + T-01）：2026-11-04 交付，commit <code>ce0ae8f</code>，CI 首跑全绿</li><li>✅ M2（P1-F~K / T-07~T-12）：2026-11-04 交付（超前于排期）；单测 26 → 45 条，三档缩放截图核对通过</li><li>⬜ M3：文档收尾、打包、SHA256、Release v1.6、真机游戏验证（T-13~T-15）</li></ul>
+<hr>
+<h2>一、版本目标</h2>
+<h3>1.1 一句话定位</h3>
+<p><strong>v1.6 = 安全阀 + 可诊断 + 可交付。</strong> 不堆新功能，把 1.5 已经做出来的能力补齐"出错时怎么办"的三道防线。</p>
+<h3>1.2 为什么是这个方向（基于代码现状的判断）</h3>
+<table><thead><tr><th>现状观察</th><th>由此得出的问题</th></tr></thead><tbody>
+<tr><td>2068 行单文件、85 个方法，1.5 一口气加了 7 个功能</td><td>功能面已够用，继续堆功能边际收益递减</td></tr>
+<tr><td>无全局暂停开关（<code>grep 暂停</code> = 0）</td><td><strong>安全隐患</strong>：热键常驻，在聊天窗口/编辑器里误触即乱打字，只能关程序</td></tr>
+<tr><td>无 excepthook、无日志文件（<code>grep 日志文件</code> = 0）</td><td><strong>不可诊断</strong>：PyInstaller <code>--windowed</code> 下崩溃零输出，用户只能报"打不开"</td></tr>
+<tr><td><code>load_store</code> 解析失败静默回退默认</td><td><strong>静默丢配置</strong>：cheats.json 损坏后用户的自定义秘籍无声消失</td></tr>
+<tr><td>无搜索（<code>grep 搜索</code> = 0），只有分组下拉</td><td>28 条尚可，用户加到 60+ 条后定位困难</td></tr>
+<tr><td>删除无撤销（<code>grep undo</code> = 0）</td><td>误删方案（含整套秘籍）不可恢复</td></tr>
+<tr><td>冲突只标红，无处置手段</td><td>用户看到"冲突"但不知道换什么键</td></tr>
+<tr><td>无 DPI 感知（<code>grep dpi</code> = 0）</td><td>Win 125%/150% 缩放下 tk 界面模糊，首屏观感差</td></tr>
+<tr><td>无 CI，靠人工跑 ruff + unittest</td><td>每次改动缺少自动回归防线，1.5 曾靠人工抓到 <code>persist</code> 重复定义</td></tr>
+<tr><td>远端 0 issue</td><td>暂无外部需求压力，可自主排期</td></tr>
+</tbody></table>
+<h3>1.3 成功标准（发布门槛，全部满足才发 1.6）</h3>
+<ol><li>暂停状态下按任意秘籍热键 <strong>零注入</strong>；恢复后立即生效</li><li>任意崩溃/异常在 <code>logs/</code> 留下可读堆栈；windowed exe 同样有效</li><li>故意写坏 <code>cheats.json</code> 后启动：生成 <code>cheats.corrupt-*.json</code> 副本 + 界面提示，且工具可正常使用</li><li>搜索 + 分组可叠加过滤，<code>Ctrl+F</code> 可直接聚焦</li><li>删除秘籍/方案后可 <code>Ctrl+Z</code> 恢复</li><li>冲突行可一键改到可用键，且不与已有绑定重复</li><li>100% / 125% / 150% 三档缩放截图无模糊、无控件裁剪</li><li>单元测试从 12 条增至 <strong>≥22 条</strong>；ruff 0 告警；<code>--selftest</code> 连跑 3 次全过</li><li>Release 附带 <code>VC-Cheat-Typer.exe</code> + SHA256 校验文件</li></ol>
+<hr>
+<h2>二、功能与改进点（按优先级）</h2>
+<h3>P0 — 发布必须（缺一不发）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>具体做法</th><th>验收标准</th></tr></thead><tbody>
+<tr><td>P0-A</td><td><strong>全局暂停 / 紧急停止</strong></td><td>新增 <code>settings.pause_hotkey</code>（默认 <code>Ctrl+Alt+P</code>，可改，复用现有 <code>HotkeyCapture</code>）；暂停时注销全部秘籍热键，恢复时整体重注册；状态栏与工具栏按钮同步变红；切状态弹 toast</td><td>暂停后按 F1~F11 无任何字符落地；恢复后正常；暂停键自身冲突时按现有机制提示</td></tr>
+<tr><td>P0-B</td><td><strong>崩溃可诊断</strong></td><td><code>sys.excepthook</code> + <code>threading.excepthook</code> → 写 <code>logs/app-YYYYMMDD.log</code>（单文件上限 1MB，保留 3 份）；崩溃弹窗显示日志路径；工具栏加"打开日志"</td><td>人为 raise 后日志含时间/线程/堆栈；exe 崩溃后日志存在</td></tr>
+<tr><td>P0-C</td><td><strong>配置容错与备份</strong></td><td><code>load_store</code> 解析失败 → 原文件改名 <code>cheats.corrupt-&lt;时间戳&gt;.json</code> 并提示；每次 <code>save_store</code> 前把上一版复制为 <code>cheats.bak.json</code>；界面加"从备份恢复"</td><td>写坏 JSON 后启动不丢原文件、可一键回滚上一版</td></tr>
+<tr><td>P0-D</td><td><strong>搜索</strong></td><td>顶部搜索框，实时过滤 名称/代码/备注（大小写不敏感）；与分组下拉<strong>叠加</strong>生效；<code>Ctrl+F</code> 聚焦、<code>Esc</code> 清空；显示"N / 总数"</td><td>输入 <code>health</code> 命中"满血"；搜索 + 分组交叉结果正确</td></tr>
+<tr><td>P0-E</td><td><strong>单步撤销</strong></td><td>删除秘籍 / 删除方案 / 批量操作前入栈（仅保留最近 1 步）；<code>Ctrl+Z</code> 或工具栏"撤销"恢复；恢复后自动重新注册热键</td><td>删方案 → 撤销 → 秘籍与热键全部回原样</td></tr>
+</tbody></table>
+<h3>P1 — 应该做（进度允许则全做）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>具体做法</th><th>验收标准</th></tr></thead><tbody>
+<tr><td>P1-F</td><td><strong>冲突处置</strong></td><td>冲突行右键菜单"换一个可用键"：按候选序列（F1–F11 → Shift+F1… → Ctrl+Shift+F1…）逐个试注册，取第一个成功且未被占用的；另有"全部冲突项自动分配"</td><td>手工占用 F1 后，右键可将该行改到可用键，且列表内无重复</td></tr>
+<tr><td>P1-G</td><td><strong>全量备份 / 恢复</strong></td><td>与现有"导出方案"并列新增"导出整包/导入整包"（settings + 全部方案 + 统计）；导入前校验 <code>app</code>/<code>version</code> 并二次确认覆盖</td><td>备份 → 改配置 → 恢复 → 内容完全一致</td></tr>
+<tr><td>P1-H</td><td><strong>单条秘籍速度覆盖</strong></td><td>cheat 级可选 <code>interval_ms</code>（0/缺省 = 跟随全局）；编辑对话框"高级"折叠区</td><td>某条设 100ms，实测发送时长 ≈ 字符数 × 100ms（±10%）</td></tr>
+<tr><td>P1-I</td><td><strong>高 DPI 适配</strong></td><td>启动即 <code>SetProcessDpiAwareness(1)</code>；按 <code>root.winfo_fpixels('1i')</code> 调整字体与表格列宽</td><td>125%/150% 截图无模糊、无裁剪</td></tr>
+<tr><td>P1-J</td><td><strong>统计增强</strong></td><td>表格增"最近使用"列；表头可按 次数/最近 排序；"清空统计"；状态栏显示"今日 N 次"</td><td>发送后 last 与今日计数立即更新</td></tr>
+<tr><td>P1-K</td><td><strong>CI 自动回归</strong></td><td><code>.github/workflows/ci.yml</code>：<code>windows-latest</code>，Python 3.10 + 3.12 矩阵，跑 <code>ruff check</code> + <code>unittest</code> + <code>py_compile</code>；README 加状态徽章</td><td>push 后 Actions 全绿；故意改坏一处能被拦下</td></tr>
+</tbody></table>
+<h3>P2 — 可选（有余量再做，不阻塞发布）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th></tr></thead><tbody>
+<tr><td>P2-L</td><td>发送中可取消</td><td>暂停键 / Esc 中止剩余字符（需在 <code>_send_worker</code> 加共享停止标志）</td></tr>
+<tr><td>P2-M</td><td>英文 README + 截图</td><td><code>README.en.md</code>，面向 GitHub 国际访客；附界面截图</td></tr>
+<tr><td>P2-N</td><td>构建脚本 + 校验和</td><td><code>build.ps1</code> 一键构建；Release 附 <code>VC-Cheat-Typer-SHA256.txt</code>；顺带评估 onedir 版（启动更快、误报率略低）</td></tr>
+<tr><td>P2-O</td><td>游戏检测联动方案</td><td>检测到游戏时自动切换到指定方案（当前检测只做状态显示与放行）</td></tr>
+</tbody></table>
+<h3>明确不做（Out of Scope，避免范围膨胀）</h3>
+<ul><li>界面框架重写（PySide/Qt）、Web UI —— 1.5 评估已否决，运行时零依赖是核心资产</li><li>自动更新 / 联网校验 —— 引入网络与签名成本，工具型需求不需要</li><li>宏录制、连招序列、多步脚本 —— 偏离"秘籍输入器"定位</li><li>多语言界面（仅英文 README 文档）、云同步、账号体系</li><li>代码签名证书 —— 成本高于收益，改为"源码可自建 + SHA256"</li><li>决定版（Definitive Edition）专项适配 —— 缺少游戏副本做真机验证，仅保留参数预设</li></ul>
+<hr>
+<h2>三、里程碑与时间安排</h2>
+<p>按<strong>单人兼职、每天 2–3 小时有效工时</strong>估算，工作日口径。</p>
+<table><thead><tr><th>里程碑</th><th>日期</th><th>内容</th><th>产出物</th><th>工时</th></tr></thead><tbody>
+<tr><td><strong>M0 基线</strong></td><td>11/05（四）</td><td>回归基线：记录当前 selftest/测试结果；搭 CI 骨架（先跑通空流水线）</td><td><code>ci.yml</code> + 基线记录</td><td>0.5d</td></tr>
+<tr><td><strong>M1 P0 交付</strong></td><td>11/06（五）– 11/10（二）</td><td>P0-A~E 五项；每项完成即补单测</td><td>可演示的 1.6-alpha</td><td>4d</td></tr>
+<tr><td><strong>M2 P1 交付</strong></td><td>11/11（三）– 11/17（二）</td><td>P1-F~K 六项；CI 全绿；三档缩放截图核对</td><td>1.6-beta</td><td>5d</td></tr>
+<tr><td><strong>M3 收尾发布</strong></td><td>11/18（三）– 11/20（五）</td><td>文档更新（README 功能表/快捷键表/日志说明）、打包、SHA256、Release v1.6；P2 有余量则并入</td><td>v1.6 正式包</td><td>3d</td></tr>
+<tr><td><strong>缓冲</strong></td><td>11/16–11/20 内预留</td><td>真机游戏验证（DirectInput 行为无法自动化）+ 返工</td><td>—</td><td>1.5d</td></tr>
+</tbody></table>
+<p><strong>关键检查点（Gate）</strong></p>
+<ul><li>G1（11/10）：P0 五项全部通过验收标准 → 否则砍 P1 范围，不砍 P0</li><li>G2（11/17）：CI 全绿 + 测试 ≥22 条 → 否则延后 P1 中最后一项，不延发布日</li><li>G3（11/19）：真机游戏内实测通过（用户侧） → 否则只发 beta 预发布</li></ul>
+<p><strong>发布动作</strong>：打 tag <code>v1.6</code>，Release 名称 <code>VC-Cheat-Typer v1.6</code>（沿用 1.5 的命名规则，不附加描述性文字），资产 <code>VC-Cheat-Typer.exe</code> + <code>VC-Cheat-Typer-SHA256.txt</code>。</p>
+<hr>
+<h2>四、风险与依赖</h2>
+<h3>4.1 风险登记</h3>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解措施</th></tr></thead><tbody>
+<tr><td>R1</td><td>暂停键与系统/其他软件冲突，导致"暂停失效"</td><td>中 / 高</td><td>复用现有 1409 冲突检测并在状态栏明示；暂停键可自定义；默认选冷门组合 <code>Ctrl+Alt+P</code></td></tr>
+<tr><td>R2</td><td>暂停/恢复时热键注册时序出错（重复注册、漏注册）</td><td>中 / 中</td><td>统一走 <code>HotkeyEngine.apply()</code> 单一入口（先全注销再注册）；补 2 条单测覆盖"暂停→恢复→再暂停"</td></tr>
+<tr><td>R3</td><td>DPI 感知开启后布局错位、控件被挤出</td><td>中 / 中</td><td>1.5 已有"grid 挤掉导入按钮"的前车之鉴；改后用 100/125/150 三档截图逐项核对</td></tr>
+<tr><td>R4</td><td>日志/备份写盘失败（exe 在只读目录，如 Program Files）</td><td>低 / 中</td><td>写失败时降级到 <code>%LOCALAPPDATA%\VC-Cheat-Typer\</code>，并只提示一次</td></tr>
+<tr><td>R5</td><td>撤销栈与方案切换交互产生脏状态</td><td>中 / 低</td><td>撤销仅保留 1 步且绑定"当前方案"；切换方案即清栈</td></tr>
+<tr><td>R6</td><td>杀软误报加剧（新增文件写入行为）</td><td>高 / 中</td><td>Release 说明保留免责与自建指引；提供 SHA256；不引入额外加壳</td></tr>
+<tr><td>R7</td><td>时间风险：年底事务 + 兼职节奏</td><td>中 / 高</td><td>只保 P0，P1 可裁剪；发布日固定 11/20，范围随进度浮动</td></tr>
+<tr><td>R8</td><td>真机验证缺位（无游戏环境时）</td><td>中 / 高</td><td>用 <code>raw_char_probe</code> + <code>--selftest</code> 兜底；发布说明标注"未覆盖决定版实机"</td></tr>
+</tbody></table>
+<h3>4.2 依赖关系</h3>
+<p><strong>硬依赖（前置阻塞）</strong></p>
+<pre><code>P0-C（备份机制） ──&gt; P1-G（全量备份/恢复，复用快照与校验）
+P0-A（暂停→注销/重注册） ──&gt; P2-L（发送中取消，共用停止标志）
+P1-I（DPI） ──&gt; 三档截图验收 ──&gt; M3 发布
+P0-B（日志） ──&gt; R3/R4 的问题定位能力
+M0（CI） ──&gt; 后续每个任务的自动回归</code></pre>
+<p><strong>外部依赖</strong></p>
+<table><thead><tr><th>依赖</th><th>用途</th><th>状态</th></tr></thead><tbody>
+<tr><td>Python 3.10 + tkinter</td><td>运行/测试</td><td>✅ 已验证</td></tr>
+<tr><td>PyInstaller 6.22.3</td><td>打包</td><td>✅ 已装</td></tr>
+<tr><td>ruff（uvx）</td><td>静态检查</td><td>✅ 可用</td></tr>
+<tr><td>GitHub Actions（windows-latest）</td><td>CI</td><td>需开通，公共仓库免费</td></tr>
+<tr><td>GCM OAuth 令牌</td><td>创建 Release / 上传资产</td><td>✅ 可用（注意本地代理未启时需 <code>--noproxy</code>）</td></tr>
+<tr><td>游戏本体</td><td>DirectInput 真机验收</td><td>⚠️ 人工，用户侧执行</td></tr>
+</tbody></table>
+<hr>
+<h2>五、任务拆分（可直接开 issue）</h2>
+<table><thead><tr><th>ID</th><th>任务</th><th>归属</th><th>估时</th><th>依赖</th><th>完成定义（DoD）</th></tr></thead><tbody>
+<tr><td>T-01</td><td>建立 CI 流水线（ruff + unittest + py_compile，3.10/3.12 矩阵）</td><td>M0</td><td>0.5d</td><td>—</td><td>push 触发全绿；README 加徽章</td></tr>
+<tr><td>T-02</td><td>日志模块：滚动文件 + excepthook + 打开日志入口</td><td>P0-B</td><td>0.8d</td><td>T-01</td><td>异常必落盘；含线程名与版本号</td></tr>
+<tr><td>T-03</td><td>配置容错：损坏隔离 + 上一版备份 + 界面恢复入口</td><td>P0-C</td><td>0.8d</td><td>T-02</td><td>坏文件不丢；可回滚</td></tr>
+<tr><td>T-04</td><td>暂停机制：设置项 + 热键 + 注销/重注册 + 状态呈现</td><td>P0-A</td><td>1.0d</td><td>T-01</td><td>暂停零注入；恢复即时</td></tr>
+<tr><td>T-05</td><td>搜索框（叠加过滤 + Ctrl+F/Esc + 计数）</td><td>P0-D</td><td>0.6d</td><td>—</td><td>组合过滤正确</td></tr>
+<tr><td>T-06</td><td>单步撤销（删除秘籍/方案）</td><td>P0-E</td><td>0.6d</td><td>T-04</td><td>删除后可完整恢复</td></tr>
+<tr><td>T-07</td><td>冲突处置右键菜单 + 批量自动分配</td><td>P1-F</td><td>1.0d</td><td>T-04</td><td>冲突可一键迁到空闲键</td></tr>
+<tr><td>T-08</td><td>整包备份/恢复（含校验与覆盖确认）</td><td>P1-G</td><td>0.8d</td><td>T-03</td><td>往返一致</td></tr>
+<tr><td>T-09</td><td>单条秘籍速度覆盖（数据 + 编辑 UI + 发送链路）</td><td>P1-H</td><td>0.8d</td><td>—</td><td>实测时长符合设定</td></tr>
+<tr><td>T-10</td><td>高 DPI 适配 + 三档截图核对</td><td>P1-I</td><td>0.8d</td><td>—</td><td>三档无模糊/裁剪</td></tr>
+<tr><td>T-11</td><td>统计增强（最近使用列 / 排序 / 清空 / 今日计数）</td><td>P1-J</td><td>0.6d</td><td>—</td><td>数据实时正确</td></tr>
+<tr><td>T-12</td><td>单测补齐至 ≥22 条（暂停、备份、撤销、搜索、校验、迁移）</td><td>全程</td><td>1.0d</td><td>各任务</td><td>覆盖率覆盖新增分支</td></tr>
+<tr><td>T-13</td><td>文档更新：功能表、快捷键表、日志与恢复说明、FAQ</td><td>M3</td><td>0.8d</td><td>P0/P1</td><td>README 与程序一致</td></tr>
+<tr><td>T-14</td><td>打包 + SHA256 + Release v1.6</td><td>M3</td><td>0.8d</td><td>T-13</td><td>资产齐全、名称规范</td></tr>
+<tr><td>T-15</td><td>真机游戏内验收（经典版；决定版尽力）</td><td>M3</td><td>0.5d</td><td>—</td><td>游戏内 5 条秘籍全部命中</td></tr>
+<tr><td>T-16（可选）</td><td>发送中取消</td><td>P2-L</td><td>0.5d</td><td>T-04</td><td>中止后不再输出字符</td></tr>
+<tr><td>T-17（可选）</td><td>英文 README + 截图</td><td>P2-M</td><td>0.6d</td><td>T-10</td><td>图文完整</td></tr>
+<tr><td>T-18（可选）</td><td><code>build.ps1</code> 一键构建</td><td>P2-N</td><td>0.4d</td><td>T-14</td><td>单命令产出 exe + 校验和</td></tr>
+</tbody></table>
+<p>合计：必做 12.9 人日，可选 +1.5 人日；按 2–3h/天折算约 <strong>11 个自然工作日</strong>，与里程碑排期吻合。</p>
+<hr>
+<h2>六、交付范围</h2>
+<h3>6.1 本次交付（v1.6）</h3>
+<ul><li>程序：P0 全部 + P1 全部（P2 视余量）</li><li>测试：≥22 条单测 + 内置 <code>--selftest</code>（保持通过）</li><li>文档：README（新功能、日志路径、备份恢复、冲突处置）、<code>docs/ROADMAP-1.6.md</code>（本文件）</li><li>工程：CI 流水线、<code>build.ps1</code>（若 P2 完成）</li><li>发布：tag <code>v1.6</code> + exe + SHA256</li></ul>
+<h3>6.2 交付形态</h3>
+<table><thead><tr><th>形态</th><th>适用人群</th><th>获取方式</th></tr></thead><tbody>
+<tr><td><code>VC-Cheat-Typer.exe</code></td><td>普通用户，免装 Python</td><td>Release 资产</td></tr>
+<tr><td>源码运行</td><td>想审计/自行打包者</td><td><code>git clone</code> + <code>run.bat</code></td></tr>
+<tr><td>校验</td><td>下载后验证完整性</td><td><code>VC-Cheat-Typer-SHA256.txt</code></td></tr>
+</tbody></table>
+<h3>6.3 不交付（明确排除，见 2.4）</h3>
+<p>界面框架重写、自动更新、宏录制、多语言 UI、云同步、代码签名、决定版专项适配。</p>
+<hr>
+<h2>七、版本号与兼容性</h2>
+<ul><li>版本号语义：功能新增 + 无破坏变更 → <code>1.6.0</code>；仅修复 → <code>1.6.x</code></li><li>配置格式：<strong>保持 v2 兼容</strong>，新增字段（<code>pause_hotkey</code>、cheat 级 <code>interval_ms</code>）为可选，缺省即旧行为；不升 v3</li><li>兼容承诺：v1.0/v1.1 的 <code>cheats.json</code> 仍可自动迁移（现有迁移路径保留，单测覆盖）</li><li>程序标识：<code>APP_NAME = "VC-Cheat-Typer"</code>、Release 名称 <code>VC-Cheat-Typer v1.6</code>（1.5 已统一，不附加描述文字）</li></ul></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

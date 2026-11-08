@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PACK-FORMAT</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>.vcpack 秘籍包格式规范（v1）</h1>
+<blockquote>适用：VC-Cheat-Typer v1.9 及以上｜解析器 <code>vcct/packs.py</code>｜零第三方依赖</blockquote>
+<h2>1. 文件与定位</h2>
+<p>单个 UTF-8 JSON 文件，扩展名建议 <code>.vcpack</code>（<code>.json</code> 亦可）。用于<strong>把一整套秘籍分享给别人</strong>，或给自己做内容备份。它只装秘籍，不装设置 / 热键注册结果 / 使用统计；整份配置备份请用「⋯ 更多 → 导出整包」。</p>
+<h2>2. 完整示例</h2>
+<pre><code>{
+  &quot;format&quot;: &quot;vcct-pack&quot;,
+  &quot;pack_version&quot;: 1,
+  &quot;name&quot;: &quot;VC 经典版 · 社区补全&quot;,
+  &quot;author&quot;: &quot;someone&quot;,
+  &quot;game&quot;: &quot;VC 经典版&quot;,
+  &quot;min_app&quot;: &quot;1.9.0&quot;,
+  &quot;exported_at&quot;: &quot;2026-11-08 09:30:00&quot;,
+  &quot;cheats&quot;: [
+    {
+      &quot;id&quot;: &quot;a1b2c3d4&quot;,
+      &quot;name&quot;: &quot;满血&quot;,
+      &quot;code&quot;: &quot;ASPIRINE&quot;,
+      &quot;hotkey&quot;: &quot;F4&quot;,
+      &quot;group&quot;: &quot;生存&quot;,
+      &quot;note&quot;: &quot;开车时同时修轮胎&quot;,
+      &quot;interval_ms&quot;: 0,
+      &quot;verified&quot;: true
+    }
+  ],
+  &quot;sha256&quot;: &quot;…64 位十六进制…&quot;
+}</code></pre>
+<h2>3. 字段定义</h2>
+<h3>顶层（必填 4 项）</h3>
+<table><thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead><tbody>
+<tr><td><code>format</code></td><td>string</td><td>必须精确等于 <code>"vcct-pack"</code>，否则拒绝导入</td></tr>
+<tr><td><code>pack_version</code></td><td>int</td><td>包格式版本，目前只支持 <code>1</code>。<strong>独立于程序版本</strong>，将来改结构不动 APP_VER</td></tr>
+<tr><td><code>cheats</code></td><td>array</td><td>至少 1 条合法秘籍；代码不得重复</td></tr>
+<tr><td><code>sha256</code></td><td>string</td><td>可选但强烈建议。见 §5</td></tr>
+</tbody></table>
+<h3>顶层（可选元数据）</h3>
+<table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody>
+<tr><td><code>name</code></td><td>包名，导入后写进「已安装记录」；缺省 <code>未命名秘籍包</code></td></tr>
+<tr><td><code>author</code></td><td>作者</td></tr>
+<tr><td><code>game</code></td><td>适用游戏模板名；导入时写到每条秘籍的 <code>game</code> 字段</td></tr>
+<tr><td><code>min_app</code></td><td>建议的最低程序版本（如 <code>1.9.0</code>）。低于它只警告，不阻断</td></tr>
+<tr><td><code>exported_at</code></td><td>导出时间字符串</td></tr>
+</tbody></table>
+<p><strong>未知字段一律忽略</strong>（不报错），方便第三方手写包与未来扩展。</p>
+<h3><code>cheats[]</code> 条目</h3>
+<table><thead><tr><th>字段</th><th>必填</th><th>说明</th></tr></thead><tbody>
+<tr><td><code>code</code></td><td>✅</td><td>秘籍代码，只含 <code>A–Z</code> / <code>0–9</code>，程序会转大写并去空格；空或不合法则该条被丢弃（整包都不合法 → 拒绝）</td></tr>
+<tr><td><code>name</code></td><td>—</td><td>缺省 = code</td></tr>
+<tr><td><code>hotkey</code></td><td>—</td><td>如 <code>F4</code> / <code>Ctrl+Shift+F2</code>。非法或不安全（无修饰键的单字母）由导入器校验；包内允许留空</td></tr>
+<tr><td><code>group</code></td><td>—</td><td>缺省 <code>自定义</code></td></tr>
+<tr><td><code>note</code></td><td>—</td><td>备注</td></tr>
+<tr><td><code>interval_ms</code></td><td>—</td><td>单条发送间隔 0–300；0 = 跟随全局；越界归 0</td></tr>
+<tr><td><code>verified</code></td><td>—</td><td>是否实机验证过，缺省 <code>true</code>。<strong>第三方模板应设为 <code>false</code></strong>，UI 会灰显标注</td></tr>
+<tr><td><code>id</code></td><td>—</td><td>本地 id；导入新条目时会重新生成，覆盖已有条目时保留原 id</td></tr>
+</tbody></table>
+<h2>4. 校验规则（<code>validate_pack</code>）</h2>
+<p>按顺序检查，命中即拒绝：</p>
+<ol><li>顶层不是 JSON 对象 → 拒绝；</li><li><code>format != "vcct-pack"</code> → 拒绝；</li><li><code>pack_version</code> 缺失 / 非整数 / 不在 <code>1..1</code> → 拒绝；</li><li><code>cheats</code> 不是数组或为空 → 拒绝；</li><li>归一化后一条都不剩，或包内 <code>code</code> 重复 → 拒绝。</li></ol>
+<p><strong>只产生警告、不阻断</strong>的情况：</p>
+<ul><li><code>sha256</code> 缺失或与内容不符（说明包被手工改过）；</li><li><code>min_app</code> 高于当前程序版本。</li></ul>
+<blockquote>为什么 sha256 不做门禁：验收要求「导出 → 手工改两条 → 再导入」能往返一致。若校验不符就拒绝，用户改包后只能重新算哈希，与"可手写包"的初衷冲突。所以它是<strong>完整性提示</strong>，不是准入条件。</blockquote>
+<h2>5. sha256 计算方式</h2>
+<ol><li>取整个包对象，<strong>剔除 <code>sha256</code> 字段</strong>；</li><li>按 key 排序，紧凑分隔（<code>separators=(",", ":")</code>），<code>ensure_ascii=False</code>；</li><li>UTF-8 编码后取 SHA-256 十六进制小写。</li></ol>
+<p>Python 等价实现：</p>
+<pre><code>import hashlib, json
+
+def sign(pack: dict) -&gt; str:
+    payload = {k: v for k, v in pack.items() if k != &quot;sha256&quot;}
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                     separators=(&quot;,&quot;, &quot;:&quot;)).encode(&quot;utf-8&quot;)
+    return hashlib.sha256(raw).hexdigest()</code></pre>
+<h2>6. 导入语义（<code>diff_pack</code> / <code>merge_pack</code>）</h2>
+<p>以 <strong>code</strong> 为唯一键，与当前方案逐条比对：</p>
+<table><thead><tr><th>状态</th><th>判定</th><th>默认勾选</th></tr></thead><tbody>
+<tr><td><code>new</code></td><td>当前方案没有这个 code</td><td>✅ 是</td></tr>
+<tr><td><code>conflict</code></td><td>同 code 但 名称/热键/分组/备注/间隔 任一不同</td><td>❌ 否（可手动勾选）</td></tr>
+<tr><td><code>same</code></td><td>完全一致</td><td>❌ 否</td></tr>
+</tbody></table>
+<ul><li>导入只处理<strong>用户在差异表里勾选</strong>的条目；</li><li>勾选「冲突项覆盖本地」时，冲突项<strong>保留原 id 就地替换</strong>；否则跳过；</li><li>新增条目分配全新 id，并写入 <code>source_pack = 包名</code>、<code>game = 包适用游戏</code>；</li><li>导入成功后把包信息写入配置的 <code>packs[]</code>（同名记录去重），可在「已安装」页移除记录；</li><li>合并函数返回新列表，不修改入参。</li></ul>
+<h2>7. 导出</h2>
+<p>「⋯ 更多 → 秘籍包管理 → 导出包」：填名称 / 作者 / 适用游戏，选择路径，<code>make_pack()</code> 自动补齐 <code>format</code> / <code>pack_version</code> / <code>min_app</code> / <code>exported_at</code> / <code>sha256</code>。</p>
+<p>手写最小可用包：</p>
+<pre><code>{
+  &quot;format&quot;: &quot;vcct-pack&quot;,
+  &quot;pack_version&quot;: 1,
+  &quot;name&quot;: &quot;我的三件套&quot;,
+  &quot;cheats&quot;: [
+    {&quot;code&quot;: &quot;ASPIRINE&quot;, &quot;name&quot;: &quot;满血&quot;},
+    {&quot;code&quot;: &quot;PANZER&quot;, &quot;name&quot;: &quot;坦克&quot;},
+    {&quot;code&quot;: &quot;LEAVEMEALONE&quot;, &quot;name&quot;: &quot;清除通缉&quot;}
+  ]
+}</code></pre>
+<h2>8. 导入端增强（v1.9.1，不改包格式）</h2>
+<table><thead><tr><th>能力</th><th>行为</th></tr></thead><tbody>
+<tr><td>热键自动避让</td><td>导入前在<strong>内存副本</strong>里检查包内热键是否与本地已绑定项、全局暂停键或包内前一条冲突；真冲突时按 F1–F11 → Shift → Ctrl → Ctrl+Shift → Alt 的候选序列改到空闲键，预览表显示新键。合法且未冲突的自定义组合保持原样；候选键用尽则留空由用户手动绑定。导入页可关闭此开关。原文件不会被改写</td></tr>
+<tr><td>包版本比对</td><td>与本地 <code>packs[]</code> 记录按包名比对：首次 / 同名新版本（<code>pack_version</code> 更高）/ 内容变化（sha256 不同）/ 完全一致，选包时直接提示。纯本地，不联网、不自动下载</td></tr>
+</tbody></table>
+<blockquote>因为避让只作用于内存副本，包内 <code>sha256</code> 仍对应原始文件，比对口径保持一致；校验和不匹配的提示依然只作提醒。</blockquote>
+<h2>9. 边界与免责</h2>
+<ul><li>包只包含<strong>键盘输入的秘籍文本</strong>，不含任何内存读写、DLL 注入、可执行代码；</li><li>未验证条目请在 <code>verified: false</code> 中如实标注；</li><li>单机专用，请勿用于联机 / 含反作弊环境。</li></ul></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>首页 / README</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer</h1>
+<p><a href="https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml/badge.svg">![CI</a>](https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml)</p>
+<blockquote>GTA: Vice City（罪恶都市）秘籍一键输入器 — Windows / 单文件 / 零第三方依赖</blockquote>
+<p>一个<strong>单文件、零第三方依赖</strong>的 Windows 桌面小工具：按一下快捷键，它替你在游戏里"打字"输入秘籍。</p>
+<ul><li>秘籍列表：查看 / 按分组切换 / 按使用次数排序，双击编辑</li><li>自定义：可添加、编辑、删除秘籍（名称 / 代码 / 分组 / 备注）</li><li>独立快捷键：每条秘籍单独绑定、捕获式改键（按下即录入），支持 Ctrl/Alt/Shift/Win 组合</li><li>冲突提示：组合键被系统或其他程序占用时，对应行标红 + 状态栏告警 + 日志说明</li><li>前台校验：默认只在目标游戏窗口处于前台时才发送，不会误打进聊天窗口；支持按进程名自动检测游戏</li><li>中文输入法免疫：发送期间自动摘掉目标窗口的 IME 关联（这是"代码没错但打不出字"的头号原因）</li><li>方案组：多套秘籍方案（如「默认」「速通」）一键切换，各自独立的快捷键与条目</li><li>游戏内悬浮提示：发送结果以不抢焦点的 toast 显示在屏幕右下角（WS_EX_NOACTIVATE）</li><li>注入自检：一键验证"扫描码 → 虚拟键 → WM_CHAR"全链路，无需进游戏</li><li>导入/导出：一键分享整份方案</li><li>配置持久化：方案、设置、使用统计保存在同目录 cheats.json（v2 格式，自动迁移 v1）</li><li>全局暂停：一键注销全部秘籍热键（默认 <code>Ctrl+Alt+P</code>），在聊天窗口/编辑器里也不怕误触</li><li>搜索：名称/代码/备注/分组实时过滤，与分组筛选叠加（<code>Ctrl+F</code> 聚焦，<code>Esc</code> 清空——发送中则优先停发送）</li><li>撤销：删除秘籍/方案后可 <code>Ctrl+Z</code> 恢复（保留最近一步）</li><li>冲突一键处置：右键冲突行「换一个可用键」，或一键为全部冲突项自动分配空闲组合键</li><li>整包备份/恢复：「⋯ 更多」里导出/导入整份配置（设置 + 全部方案 + 统计），换机、重装不丢数据</li><li>单条速度覆盖：编辑秘籍时可单独设置发送间隔（如慢速长代码设 100ms），默认跟随全局</li><li>高 DPI 适配：125% / 150% 缩放下界面按比例放大，无模糊、无控件裁剪</li><li>统计增强：表格新增「最近使用」列，表头可按 次数/最近/名称 排序，可清空统计，显示「今日 N 次」</li><li>数据安全：配置每次保存前自动留上一版（<code>cheats.bak.json</code>），损坏文件隔离留存并可一键恢复</li><li>可诊断：运行日志与崩溃堆栈自动写入 <code>logs/app.log</code>（窗口闪退也能查到原因）</li><li>发送可中断：发送中按钮原地变「■ 停止」，或按 <code>Esc</code>；暂停 / 关闭程序会立刻中止在飞发送</li><li>残键兜底：任何路径退出（取消 / 异常 / 关窗）都保证按键成对抬起，不会出现"角色一直跑"</li><li>连按去抖：同一秘籍 250ms 内重复触发只发一次（可在「⋯ 更多」→ 设置里改）</li><li>发送质量日志：<code>logs/app.log</code> 记录每次发送的计划/实际时长与偏差，节奏被拖慢（丢字前兆）会打 WARN</li><li>托盘常驻（1.8）：关闭/最小化窗口即收进系统托盘，托盘菜单 显示 / 暂停热键 / 退出；Explorer 重启后图标自动恢复</li><li>按游戏自动切方案（1.8）：配置「游戏规则表」（按进程名或标题匹配），游戏窗口到前台 0.8 秒后自动切换到对应方案（发送中绝不切换）</li><li>首次启动向导（1.8）：选参数预设 → 注入自检 → 冲突检测三步跑通，<code>Ctrl+F1</code> 随时重开</li><li>设置对话框（1.8）：目标关键字 / 间隔 / 方案管理 / 导入导出 / 统计 / 自动切换规则全部收进「⚙ 设置」（常规 / 输入 / 游戏 / 数据 四页），主界面只留高频操作</li><li>热键总览（1.8）：一张表列出全部热键、占用状态、所属方案，冲突红标，支持「重新检测占用」与导出为文本</li><li>配置 v3 + 迁移链（1.9）：v1 / v2 配置自动升级，升版前永久备份 <code>cheats.v2.bak.json</code>；读到更新版本配置会明确提示且<strong>拒绝回写</strong>；<code>--export-v2</code> / 界面导出兼容旧版配置</li><li>秘籍包 <code>.vcpack</code>（1.9）：导出整套秘籍分享；导入前 diff 预览（新增 / 冲突 / 相同），只导入勾选条目，冲突可覆盖可跳过，包内含 sha256 完整性提示</li><li>批量编辑（1.9）：列表多选（Ctrl/Shift），批量改分组 / 分配空闲热键 / 设发送间隔 / 删除（一步撤销整份快照）</li><li>多游戏模板（1.9）：VC 经典版 / 决定版（自动套参数）、GTA III / SA（公开秘籍文本，<strong>未实机验证</strong>条目灰显标注、默认不绑热键）</li><li>文本 / CSV 粘贴导入（1.9）：<code>名称,代码,热键</code> 或纯代码行，逐行报错带行号，预览确认后再导入</li><li>发送历史（1.9.1）：最近 50 次发送（时间/秘籍/方案/结果/耗时/说明），可一键重发、可清空</li><li>键盘全导航（1.9.1）：列表 ↑↓ 选中、<code>Home</code>/<code>End</code> 跳首尾、<code>Enter</code> 发送；所有弹窗 <code>Esc</code> 关闭</li><li>包管理增强（1.9.1）：导入时自动避让热键冲突、同名包版本/内容变化提示</li><li>一键构建（1.9.1）：<code>build.ps1</code> 自动跑单测 + ruff + PyInstaller + 生成 SHA256 清单</li><li>通用输入平台（2.0）：<code>vcct.core</code> 零 tkinter 公共 API、目标规则、发送策略引擎、扩展点、CLI、双产物、离线文档站</li></ul>
+<h2>v2.0 更新内容（通用输入平台）</h2>
+<blockquote>定位不是"功能更多"，而是<strong>可被复用</strong>：把 <code>SendInput + IME 绕行 + 热键总线 + 前台判定</code> 从"VC 秘籍"业务里剥出来，任何按键类游戏/软件注入文本的场景都能用。<strong>默认配置下行为与 1.9.1 逐项一致</strong>（Gate G2.0）。</blockquote>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>2.0-A</strong></td><td><code>vcct.core</code> 核心库独立</td><td>新增 <code>vcct/core/</code> 门面包（公共 API）+ <code>targets</code> / <code>strategy</code> / <code>hooks</code> 三个平台无关模块。<strong>兼容式抽库</strong>：既有 <code>vcct/*.py</code> 原地保留为实现层，1.7～1.9 的 import、spec、UI 全部不动（规避"抽库演变成重写"风险）；<code>loggingx</code> 的崩溃弹窗改为 UI 层注入，实现层彻底零 tkinter；AST 守卫测试检查 core 不 import tkinter / ctypes，<code>import vcct.core</code> 不会加载 Win32 DLL</td></tr>
+<tr><td><strong>2.0-B</strong></td><td>发送策略引擎</td><td><code>SendStrategy</code> 只暴露 5 个参数（kind / interval / hold / pre / retries）：<code>fixed</code>（默认，与 1.9.1 参数完全一致、不重试）、<code>burst</code>（整串最快）、<code>adaptive</code>（丢字自动加长间隔并按剩余字符重试）。秘籍级可指定，具名策略表 <code>strategies</code> 可继承，目标规则可 <code>strategy_ref</code> 引用</td></tr>
+<tr><td><strong>2.0-C</strong></td><td>目标应用规则化</td><td><code>Target = {name, match(exe/title/class), require_foreground, ime_policy, strategy_ref, profile_ref}</code>。配置可选字段 <code>targets</code>，非空时优先于 1.8 的 <code>games</code>；缺省空 = 旧行为。新增一个目标（记事本/模拟器）只改配置不改代码；设置 → 游戏 可一键从 games 生成 targets</td></tr>
+<tr><td><strong>2.0-D</strong></td><td>扩展点</td><td><code>HookBus</code> 前置/后置钩子（否决发送、发送后回调），内置"切窗口/回切"与"纯日志"两个示例工厂；<strong>默认关闭</strong>，可在 设置 → 常规 打开。钩子内部抛异常不影响发送</td></tr>
+<tr><td><strong>2.0-E</strong></td><td>命令行入口</td><td><code>python -m vcct.cli</code> 或 <code>VC-Cheat-Typer.exe --cli</code>：<code>version</code> / <code>list</code> / <code>targets</code> / <code>strategies</code> / <code>pack info</code> / <code>send</code>（<strong>默认只预演，必须 <code>--execute</code> 才真正注入</strong>）/ <code>export-v2</code></td></tr>
+<tr><td><strong>2.0-F</strong></td><td>双产物与升级出口</td><td>onefile（便携）+ onedir（启动快，<code>build.ps1 -OneDir</code> 生成 zip + SHA256）；<code>--export-v2</code> / 界面导出保留回退路径；v3 配置不变，新增 <code>targets</code> / <code>strategies</code> / <code>hooks_enabled</code> 全部可选</td></tr>
+<tr><td><strong>2.0-G</strong></td><td>离线文档站</td><td><code>python tools/build_docs.py</code> 零依赖生成 <code>docs/site/*.html</code>（10 页，无外链/JS，双击即可离线打开）</td></tr>
+<tr><td><strong>2.0-H</strong></td><td>升级验证</td><td><code>tests/test_v2_upgrade.py</code>：从 v1.6 / v1.8 / v1.9 三条真实形态配置升级，验证方案/热键/统计/包/历史零丢失、v2 出口可读、整包往返一致、更高版本禁止回写</td></tr>
+</tbody></table>
+<p><strong>架构约束</strong>（写进 <code>vcct/core/__init__.py</code>，由测试守住）：core 不得 import tkinter；core 新模块不得直接调 Win32；UI 仍通过实现层调用平台 API。</p>
+<p><strong>CLI 示例</strong>：</p>
+<pre><code>VC-Cheat-Typer.exe --cli list
+VC-Cheat-Typer.exe --cli targets
+VC-Cheat-Typer.exe --cli send ASPIRINE --target VC        :: 只预演
+VC-Cheat-Typer.exe --cli send ASPIRINE --target VC --execute
+python -m vcct.cli pack info cheats.vcpack</code></pre>
+<h2>v1.9.1 更新内容（补全可选项 + 明显缺陷修复）</h2>
+<blockquote>本版<strong>不改配置结构</strong>（仍为 v3），不改包格式，也不改变任何既有交互的默认值；新增内容全部为可选。</blockquote>
+<h3>新增（路线图 P1 可选项）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th></tr></thead><tbody>
+<tr><td>1.9-G</td><td>包内热键自动避让</td><td>导入 .vcpack 时若包内热键与本地（含暂停键）或包内自身冲突，自动改到候选空闲键（F1–F11 → Shift → Ctrl → Ctrl+Shift → Alt），并在预览行显示改动；仅<strong>真冲突</strong>才改，合法自定义组合保持原样。导入页可取消勾选</td></tr>
+<tr><td>1.9-H</td><td>包版本比对</td><td>与本地已安装记录比对：首次 / 同名新版本 / 内容变化（校验和不同）/ 完全一致，选包时直接提示。纯本地，不联网、不自动下载</td></tr>
+<tr><td>1.8-I</td><td>发送历史面板</td><td>「⋯ 更多 → 发送历史（最近 50 次）」或 设置 → 数据：时间 / 名称 / 代码 / 方案 / 结果 / 耗时 / 说明；双击或按钮重发（按当前方案中的代码查找，跨方案会提示切换）；可清空。记录写入 v3 可选字段 <code>history</code>，上限 50</td></tr>
+<tr><td>1.8-G</td><td>键盘全导航</td><td>列表 ↑↓ 选中、<code>Home</code>/<code>End</code> 跳首尾、<code>Enter</code> 发送（原有）、<code>Tab</code> 顺序沿用控件创建顺序；所有 Toplevel 弹窗统一 <code>Esc</code> 关闭（主窗口 <code>Esc</code> = 停发送 / 清搜索 的语义不变）</td></tr>
+<tr><td>1.7-G</td><td>英文 README</td><td><code>README.en.md</code>：运行环境、3 分钟上手、功能、CLI、自建流程与文档索引</td></tr>
+<tr><td>1.7-H</td><td><code>build.ps1</code></td><td>一键构建：可选单测 + ruff → PyInstaller → 生成 <code>sha256sum</code> 兼容的 SHA256 清单；版本号从 <code>vcct/const.py</code> 读取并与最新 git tag 核对，默认<strong>不改源码</strong>（<code>-SyncFromTag</code> 才同步）</td></tr>
+</tbody></table>
+<blockquote>路线图 1.9-I「导出为 v2 兼容包」已由 1.9-A 的 <code>--export-v2</code> / 界面「导出 v2 兼容配置」<strong>等价实现</strong>（导出的是可被 1.6/1.7/1.8 直接读取的完整配置，比只导秘籍更有用），因此不再重复做一个功能较弱的 v2 包。</blockquote>
+<h3>修复（影响现有功能正常运行的明显问题）</h3>
+<table><thead><tr><th>问题</th><th>影响</th><th>修复</th></tr></thead><tbody>
+<tr><td>托盘 <code>TrayIcon._failed</code> 在线程里才赋值，主线程启动后立刻读</td><td>竞态下抛 <code>AttributeError</code> → 托盘被判为不可用，<strong>关窗不再进托盘</strong>，随机复现</td><td>在 <code>__init__</code> 启动线程<strong>之前</strong>初始化为 <code>False</code>（新增回归测试）</td></tr>
+<tr><td><code>HotkeyOverview</code> 用 <code>ttk.Frame(..., bg=...)</code></td><td>ttk 不接受 <code>-bg</code> → <strong>「快捷键总览」面板根本打不开</strong>（此前 GUI 冒烟没覆盖这个对话框）</td><td>去掉非法选项，并把该对话框加入 GUI 冒烟构建测试</td></tr>
+<tr><td>设置 → 输入 的 <code>&lt;FocusOut&gt;</code> 绑在容器 <code>Frame</code> 上</td><td>容器不会拿到焦点事件 → 改关键字/间隔后不落盘</td><td>改绑到真正拿焦点的 Entry / Spinbox，并补 <code>&lt;Return&gt;</code> 即时保存</td></tr>
+<tr><td>批量「分配空闲热键」对全部选中项重排</td><td>全选后会把用户精心配好的 28 个键<strong>无声打乱</strong></td><td>只处理「未绑定 / 已冲突」的条目，其余提示保持不变</td></tr>
+<tr><td>热键总览每 800ms 重建表格</td><td>选中行与滚动位置被反复清空</td><td>行改用稳定 iid（<code>方案:id</code>），刷新前后保存/恢复选中与滚动</td></tr>
+<tr><td><code>_auto_switch_tick()</code> 在游戏检测的 <code>try</code> 内</td><td>检测环节一抛异常就连带跳过自动切方案</td><td>移到 <code>try</code> 外独立执行</td></tr>
+<tr><td>注入探针 <code>WM_DESTROY</code> 里 <code>PostQuitMessage(0)</code> + 固定窗口类名/局部回调</td><td>每次探针在线程队列留下 <code>WM_QUIT</code>，<strong>下一次</strong>调用刚进消息泵就退出；且第二次复用已被 GC 的窗口过程。表现：连点两次「注入自检」第二次必失败、<code>--selftest</code> 重试也拿不到字符</td><td>去掉 <code>PostQuitMessage</code>（自泵循环用截止时间收尾），每次改用唯一窗口类名并在结束时 <code>UnregisterClassW</code>；新增同进程连跑两次的回归测试（<code>VCCT_REAL_PROBE=1</code> 手动启用，已实测通过）</td></tr>
+<tr><td>探针发送途中被别的程序抢走前台</td><td>剩余字符打到别处 → 诊断误报「丢字」</td><td>逐字符检查并重新抢前台；<code>--selftest</code> 最多重试 3 次，且「根本没取得前台」判为<strong>未验证</strong>而非失败</td></tr>
+<tr><td><code>_norm_history</code> 先截断 50 条再过滤脏记录</td><td>脏记录占用上限，有效历史被挤掉</td><td>先过滤再截断（新增回归测试）</td></tr>
+</tbody></table>
+<h2>v1.9 更新内容（内容可流通）</h2>
+<table><thead><tr><th>新增</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>配置升 v3 + 迁移链</strong></td><td><code>migrate_store()</code> 纯函数串行 v1 → v2 → v3，新增 <code>packs</code> / <code>ui</code> / 方案 <code>game</code> 绑定 / 单条 <code>verified</code> 标记；升版前自动备份迁移前原件（<code>cheats.v2.bak.json</code>，只留第一次）；读到更高版本配置明确提示「请升级程序」并<strong>禁止回写</strong>，绝不静默降级毁数据</td></tr>
+<tr><td><strong>升级出口</strong></td><td>CLI <code>VC-Cheat-Typer.exe --export-v2 [路径]</code> 或「⋯ 更多 → 导出 v2 兼容配置…」：<code>to_v2()</code> 剥掉 v3 新字段，产物可被 1.6/1.7/1.8 直接读取，不覆盖当前配置</td></tr>
+<tr><td><strong>.vcpack 秘籍包</strong></td><td>「⋯ 更多 → 秘籍包管理」三页：导入（diff 预览 + 勾选 + 冲突覆盖开关）、导出（包名/作者/适用游戏 + sha256）、已安装记录。格式详见 <code>docs/PACK-FORMAT.md</code>。包校验和只是完整性提示，手工改过的包仍可导入</td></tr>
+<tr><td><strong>批量编辑</strong></td><td>列表改多选；右键「批量操作」：改分组 / 分配空闲热键 / 设发送间隔 / 批量删除（二次确认列出名称，撤销一步恢复整份方案快照）</td></tr>
+<tr><td><strong>多游戏模板</strong></td><td>「⋯ 更多 → 套用游戏模板」：VC 经典版（28 条全绑定）、VC 决定版（同套代码 + 70ms/250ms 参数 + 已知差异）、GTA III / SA（公开秘籍文本，<code>verified=false</code> 灰显「⚠ 未实机验证」，默认不绑热键）。可新建方案存放或替换当前方案</td></tr>
+<tr><td><strong>文本 / CSV 粘贴导入</strong></td><td>「⋯ 更多 → 从文本/CSV 粘贴导入」：支持 <code>代码</code> / <code>名称,代码</code> / <code>名称,代码,热键</code> / <code>名称,代码,热键,备注</code>（逗号或 Tab），<code>#</code> 注释；逐行报错（行号 + 原因），预览后确认，导入条目标注未验证</td></tr>
+<tr><td>文档</td><td><code>docs/PACK-FORMAT.md</code>（第三方可照文档手写合法包）、<code>docs/MIGRATION.md</code>（迁移 / 备份 / 回退 / 回归样本）</td></tr>
+</tbody></table>
+<blockquote><strong>GTA III / SA 模板免责</strong>：仅录入公开流传的秘籍文本，<strong>未在本工具上实机验证</strong>，效果与可用性请自行确认；相关条目在界面里灰显标注且默认不绑定热键。</blockquote>
+<h2>v1.8 更新内容（场景化与可用性）</h2>
+<table><thead><tr><th>新增</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>托盘常驻</strong></td><td>关闭窗口 / 最小化 = 收进系统托盘（右键菜单：显示主界面 / ⏸ 暂停热键 / 退出）。Explorer 崩溃重启后监听 <code>TaskbarCreated</code> 自动补回图标。偏好旧行为可在 设置 → 常规 取消「最小化到托盘」</td></tr>
+<tr><td><strong>按游戏自动切方案</strong></td><td>设置 → 游戏 添加规则（名称 / 匹配方式 exe·标题 / 匹配内容 / 目标方案 / 启用）。游戏窗口在前台且稳定 0.8 秒后自动切换方案并 toast 提示；发送中不切换；默认无规则 = 旧行为不变</td></tr>
+<tr><td><strong>首次启动向导</strong></td><td>空配置（或从未完成）启动时弹出 3 步向导：① 选参数预设（可勾选"游戏前台自动启用"）→ ② 运行注入自检验证按键能送达 → ③ 快捷键冲突检测与一键分配。可跳过；<code>Ctrl+F1</code> 或 设置 → 常规 重开</td></tr>
+<tr><td><strong>设置收敛到对话框</strong></td><td>主界面工具条只留 方案切换 / 重新注册快捷键 / 热键总览 / ⚙ 设置；原两行密集工具条的关键字、间隔、前台校验、IME、方案管理、导入导出、统计、备份恢复全部搬进「⚙ 设置」四页（常规 / 输入 / 游戏 / 数据），所有设置项与 1.7 逐项等价</td></tr>
+<tr><td><strong>快捷键总览面板</strong></td><td>「⌨ 热键总览」：全部热键（含全局暂停键）+ 占用状态 + 所属方案，冲突红标、未注册灰显；「↻ 重新检测占用」主动试注册；「导出为文本」含方案名与备注</td></tr>
+<tr><td>配置兼容</td><td>新增可选字段 <code>close_to_tray</code> / <code>auto_switch</code> / <code>onboarded</code> 与顶层 <code>games</code> 规则表——全部缺省即旧行为，1.7 及更早配置直接可读，旧程序忽略新字段</td></tr>
+</tbody></table>
+<h2>v1.7.1 更新内容（重要修复）</h2>
+<table><thead><tr><th>修复</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>权限不匹配检测</strong></td><td>游戏以管理员运行而本工具不是时，Windows 的 UIPI 会<strong>静默丢弃</strong>注入的按键（SendInput 仍返回成功）——表现就是"按了完全没反应、日志也没有错误"。现在：① 启动即检测并显示红色告警；② 发送前拦截并明确告知原因；③ 提供「以管理员身份重启」一键修复（UAC 提权）</td></tr>
+<tr><td>拾取窗口修正</td><td>「拾取当前窗口」原实现取的是<strong>点击按钮瞬间的前台</strong>——那必然是本工具自己，导致目标关键字被污染、前台校验永远失败。改为优先用进程检测到的游戏窗口，其次用后台轮询记住的"最近一个非本工具前台窗口"</td></tr>
+<tr><td>关键字自愈</td><td>启动时若发现目标关键字指向本工具自身（历史误操作的产物），自动重置为「Vice City」并提示</td></tr>
+<tr><td>环境诊断</td><td>「⋯ 更多」→「环境诊断」，或命令行 <code>VC-Cheat-Typer.exe --diagnose</code>：系统 / 权限 / 游戏进程与提权状态 / 窗口可见性 / 前台匹配 / 注入探针，一次看完</td></tr>
+</tbody></table>
+<p><strong>"按了没反应"排查顺序</strong>：① 工具右上角是否显示 🔴 权限告警 → 以管理员重启；② 游戏窗口是否最小化/未聚焦 → 切到游戏前台；③ 跑一次「环境诊断」；④ 看 <code>logs/app.log</code> 的 <code>SEND</code> 行。</p>
+<h2>v1.7 更新内容</h2>
+<table><thead><tr><th>新增 / 改进</th><th>说明</th></tr></thead><tbody>
+<tr><td>发送可取消</td><td>发送中「▶ 发送所选」原地变「■ 停止 (Esc)」，点击或按 <code>Esc</code> 立即停手；日志/toast 显示停在第几个字符</td></tr>
+<tr><td>暂停语义修正</td><td>进入暂停先中止在飞发送，再注销热键（v1.6 只注销热键，正在打的那条会继续打完）</td></tr>
+<tr><td>残键兜底</td><td>按键抬起放 <code>finally</code>；取消/异常/关闭程序时自动松开 Ctrl/Shift/Win，杜绝"角色一直跑"</td></tr>
+<tr><td>发送引擎独立</td><td>按键循环抽到 <code>vcct/sender.py</code>（与平台无关，可单测）：睡眠切片 ≤20ms，停止标志最快 20ms 内生效</td></tr>
+<tr><td>连按去抖</td><td>同一秘籍 250ms 内连按只发一次（<code>debounce_ms</code> 可配，0 关闭）</td></tr>
+<tr><td>发送质量日志</td><td>每次 SEND 记录 planned/actual/dev；偏差 &gt;15% 打 WARN，是"丢字"的前兆信号</td></tr>
+<tr><td>工程结构</td><td>单文件 2900 行拆为 <code>vcct/</code> 包（const/winapi/hotkeys/store/loggingx/sender），主文件降至 ~1750 行，行为零变更</td></tr>
+<tr><td>线程安全修复</td><td>发送线程启动失败时归还互斥锁（原实现锁泄漏后所有发送静默丢弃）；抢占失败改为日志 + toast 提示</td></tr>
+</tbody></table>
+<h2>v1.6 更新内容</h2>
+<table><thead><tr><th>新增</th><th>说明</th></tr></thead><tbody>
+<tr><td>全局暂停 / 恢复</td><td>右上角按钮或 <code>Ctrl+Alt+P</code>（可改）。暂停时注销全部秘籍热键，仅保留暂停键本身；重启后不保持暂停（安全侧）</td></tr>
+<tr><td>搜索框</td><td>与分组下拉叠加过滤，实时显示「匹配 N / 共 M 条」；<code>Ctrl+F</code> 聚焦、<code>Esc</code> 清空</td></tr>
+<tr><td>单步撤销</td><td>删除秘籍或方案后 <code>Ctrl+Z</code> / 「撤销」按钮恢复，切换方案即清空撤销栈</td></tr>
+<tr><td>冲突一键处置</td><td>右键列表行 →「换一个可用键（本行）」/「自动分配全部冲突项」；按 F1–F11 → Shift → Ctrl → Ctrl+Shift → Alt 候选序列挑选空闲键，注册仍失败（系统占用）会自动换下一批（最多 2 轮）</td></tr>
+<tr><td>整包备份 / 恢复</td><td>「⋯ 更多」→ 导出/导入整包（设置 + 全部方案 + 使用统计 + 当日计数）；导入前校验来源并二次确认覆盖</td></tr>
+<tr><td>单条速度覆盖</td><td>编辑对话框新增「发送间隔」：0/跟随全局 = 用全局设置；个别秘籍可设 20–300ms</td></tr>
+<tr><td>高 DPI 适配</td><td>启动即开启 DPI 感知（在创建窗口之前，避免系统拉伸模糊），窗口、行高、列宽按 DPI 比例缩放；100%/125%/150% 三档截图核对通过</td></tr>
+<tr><td>统计增强</td><td>新增「最近使用」列；表头 次数/最近/名称 点击排序（再点反向）；「⋯ 更多」→ 清空统计；计数栏显示「今日 N 次」</td></tr>
+<tr><td>配置容错与备份</td><td>cheats.json 解析失败 → 原文件改名 <code>cheats.corrupt-&lt;时间戳&gt;.json</code> 留存并弹窗提示；每次保存前自动备份上一版，「从备份恢复」一键回滚</td></tr>
+<tr><td>日志与崩溃捕获</td><td>界面日志同步写 <code>logs/app.log</code>（1MB 滚动保留 3 份）；未捕获异常（含子线程）落盘并弹窗告知路径；exe 只读目录时自动退到 <code>%LOCALAPPDATA%</code></td></tr>
+<tr><td>CI</td><td>GitHub Actions（Windows，Python 3.10/3.12）：ruff + 单元测试 + 编译检查，push 即回归</td></tr>
+</tbody></table>
+<h2>v1.5 更新内容</h2>
+<table><thead><tr><th>新增</th><th>说明</th></tr></thead><tbody>
+<tr><td>方案组</td><td>「方案」下拉框 + 新建副本 / 重命名 / 删除；每个方案独立秘籍列表与快捷键</td></tr>
+<tr><td>参数预设</td><td>「经典版」（45ms）/「决定版」（70ms，Unreal 引擎帧率不定，整体放慢）一键切换</td></tr>
+<tr><td>游戏自动检测</td><td>按 <code>EnumWindows</code> + 进程名自动识别 GTA VC，状态栏显示 🟢/⚪；检测到游戏时前台校验直接放行</td></tr>
+<tr><td>游戏内悬浮提示</td><td>不抢焦点的 toast，发送成功/失败即时反馈</td></tr>
+<tr><td>使用统计</td><td>记录每条秘籍发送次数，点击「次数 ↓」表头按使用频率排序</td></tr>
+<tr><td>导入/导出方案</td><td>JSON 分享</td></tr>
+<tr><td>注入自检</td><td>替代原"测试输入窗口"：在隐藏原生 Win32 窗口上验证完整注入链路并弹窗报结果</td></tr>
+<tr><td>工程化</td><td><code>tests/</code> 回归测试集（<code>python -m unittest discover -s tests</code>）+ <code>pyproject.toml</code>（ruff 静态检查），均为开发期工具，<strong>运行时依旧零依赖</strong></td></tr>
+</tbody></table>
+<hr>
+<h2>一、运行环境</h2>
+<table><thead><tr><th>项目</th><th>要求</th></tr></thead><tbody>
+<tr><td>操作系统</td><td>Windows 10 / 11（64 位）</td></tr>
+<tr><td>Python</td><td>3.8 及以上，<strong>必须带 tkinter</strong>（python.org 官方安装包默认包含）</td></tr>
+<tr><td>第三方库</td><td>无。只用标准库 + Windows API（ctypes）</td></tr>
+<tr><td>权限</td><td>普通用户即可；若游戏以管理员身份运行，本工具也需以管理员运行（见下文）</td></tr>
+</tbody></table>
+<p>本机已验证环境：Windows 11 + Python 3.10.10（64 位）。</p>
+<p><strong>启动方式</strong>（任选其一）：</p>
+<pre><code>:: 方式一：双击 run.bat（后台运行，无控制台窗口）
+
+:: 方式二：命令行
+&quot;%LOCALAPPDATA%\Programs\Python\Python310\pythonw.exe&quot; vc_cheat_typer.py
+
+:: 方式三：先跑一次自检（推荐首次使用时执行）
+&quot;%LOCALAPPDATA%\Programs\Python\Python310\python.exe&quot; vc_cheat_typer.py --selftest</code></pre>
+<p>自检会验证：结构体尺寸、组合键解析、真实键盘注入落字、热键注册与冲突返回码、GUI 启动。 本机自检输出：<code>自检结果: 全部通过</code>。</p>
+<h2>二、使用前提（游戏侧）</h2>
+<ol><li><strong>版本</strong>：经典 PC 版 GTA: Vice City（1.0 版最佳）；The Definitive Edition（决定版）的键盘输入秘籍大部分同样有效，但输入窗口与帧率行为不同，间隔建议调到 60ms 以上。</li><li><strong>游戏必须处于前台</strong>：本工具是"替你打字"，游戏窗口不在前台就收不到（工具默认会校验并提示）。</li><li><strong>处于游戏内画面</strong>：主菜单 / 读档画面无效；正在播过场动画时输入可能被吞。</li><li><strong>小技巧</strong>：先按 <code>Esc</code> 打开暂停菜单再触发秘籍，可以避免"打字的过程"在游戏里触发跳跃、加速跑等按键副作用（官方维基推荐做法），输完再按 <code>Esc</code> 返回。</li><li><strong>单机专用</strong>：请勿在联机 / 含反作弊的环境使用。本工具只发送标准键盘事件，不读写游戏内存、不改游戏文件。</li><li><strong>成功标志</strong>：屏幕左上角出现 <strong>"Cheat Activated"</strong>。</li></ol>
+<h2>三、快速上手</h2>
+<ol><li>双击 <code>run.bat</code> 启动工具（首次运行自动生成 <code>cheats.json</code>，内置 28 条已核对秘籍）；</li><li><strong>首次启动会弹 3 步向导</strong>：选参数预设 → 注入自检 → 冲突检测（可跳过，<code>Ctrl+F1</code> 重开）；</li><li>切到游戏窗口，按任意默认快捷键（如 <code>F4</code> 满血）；</li><li>看到左上角 "Cheat Activated" 即成功。</li></ol>
+<blockquote>1.8 起：关窗/最小化会收进<strong>系统托盘</strong>（点托盘图标恢复，右键退出）；在 设置 → 游戏 添加规则后，游戏到前台会<strong>自动切换方案</strong>。</blockquote>
+<h3>默认快捷键表（28 条，全部预绑定）</h3>
+<table><thead><tr><th>快捷键</th><th>秘籍</th><th>效果</th></tr></thead><tbody>
+<tr><td>F1</td><td>THUGSTOOLS</td><td>一级武器</td></tr>
+<tr><td>F2</td><td>PROFESSIONALTOOLS</td><td>二级武器</td></tr>
+<tr><td>F3</td><td>NUTTERTOOLS</td><td>三级武器</td></tr>
+<tr><td>F4</td><td>ASPIRINE</td><td>满血</td></tr>
+<tr><td>F5</td><td>PRECIOUSPROTECTION</td><td>满护甲</td></tr>
+<tr><td>F6</td><td>LEAVEMEALONE</td><td>清除通缉</td></tr>
+<tr><td>F7</td><td>YOUWONTTAKEMEALIVE</td><td>通缉 +2 星</td></tr>
+<tr><td>F8</td><td>PANZER</td><td>犀牛坦克</td></tr>
+<tr><td>F9</td><td>GETTHEREFAST</td><td>Sabre Turbo</td></tr>
+<tr><td>F10</td><td>BETTERTHANWALKING</td><td>高尔夫球车</td></tr>
+<tr><td>F11</td><td>THELASTRIDE</td><td>灵车</td></tr>
+<tr><td>Shift+F1</td><td>ROCKANDROLLCAR</td><td>Love Fist 加长车</td></tr>
+<tr><td>Shift+F2</td><td>RUBBISHCAR</td><td>垃圾车</td></tr>
+<tr><td>Shift+F3</td><td>SEAWAYS</td><td>汽车水上行驶</td></tr>
+<tr><td>Shift+F4</td><td>COMEFLYWITHME</td><td>飞行汽车</td></tr>
+<tr><td>Shift+F5</td><td>GRIPISEVERYTHING</td><td>操控提升</td></tr>
+<tr><td>Shift+F6</td><td>LOADSOFLITTLETHINGS</td><td>超大轮子</td></tr>
+<tr><td>Shift+F7</td><td>WHEELSAREALLINEED</td><td>隐形车（只显示车轮）</td></tr>
+<tr><td>Shift+F8</td><td>BIGBANG</td><td>炸毁所有车辆</td></tr>
+<tr><td>Shift+F9</td><td>GREENLIGHT</td><td>全绿灯</td></tr>
+<tr><td>Shift+F10</td><td>MIAMITRAFFIC</td><td>疯狂驾驶</td></tr>
+<tr><td>Shift+F11</td><td>ALOVELYDAY</td><td>晴天</td></tr>
+<tr><td>Ctrl+Shift+F1</td><td>APLEASANTDAY</td><td>多云</td></tr>
+<tr><td>Ctrl+Shift+F2</td><td>CATSANDDOGS</td><td>暴雨</td></tr>
+<tr><td>Ctrl+Shift+F3</td><td>FIGHTFIGHTFIGHT</td><td>市民暴动 ⚠不可撤销</td></tr>
+<tr><td>Ctrl+Shift+F4</td><td>CHICKSWITHGUNS</td><td>武装女性</td></tr>
+<tr><td>Ctrl+Shift+F5</td><td>OURGODGIVENRIGHTTOBEARARMS</td><td>人人持枪 ⚠不可撤销</td></tr>
+<tr><td>Ctrl+Shift+F6</td><td>FANNYMAGNET</td><td>女性跟随</td></tr>
+</tbody></table>
+<blockquote>⚠ <strong>不可撤销警告</strong>：<code>FIGHTFIGHTFIGHT</code>（暴动）、<code>NOBODYLIKESME</code>（全民仇恨）、<code>OURGODGIVENRIGHTTOBEARARMS</code>（人人持枪）这三条<strong>无法关闭</strong>，存档后永久生效，会卡死部分任务流程。建议玩坏了就别存盘、读旧档。  注：默认不使用 F12 —— 该键常被系统调试器 / OneDrive / 显卡工具占用。</blockquote>
+<h2>四、快捷键冲突提示（工作原理）</h2>
+<ul><li>工具用 <code>RegisterHotKey</code> 注册全局热键，该 API 天然独占：</li><li><strong>与其他程序冲突</strong> → 系统返回错误码 1409，对应行标红，状态栏显示"⚠ N 个快捷键不可用"，日志会点名占用组合键；</li><li><strong>同一列表内两条秘籍绑了同一个键</strong> → 直接判为冲突，不会注册第二个；</li><li><strong>权限不足</strong>（游戏以管理员运行而工具不是）→ 提示以管理员身份运行。</li><li>常见占用者：输入法切换键、显卡/录屏软件、F12（系统调试器）、其他按键精灵类工具。<strong>双击对应行 → 捕获新键</strong>即可解决；</li></ul>
+<p>也可以<strong>右键冲突行 →「换一个可用键」</strong>让工具自动挑一个空闲组合键，或右键 →「自动分配全部冲突项」一次清完。</p>
+<ul><li>防呆设计：单个字母/数字不允许作为无修饰热键（否则游戏里按 A 就触发秘籍、打不了字），捕获时会直接拒绝。</li></ul>
+<h2>五、前台校验与游戏检测</h2>
+<ul><li><strong>自动检测</strong>：工具每 3 秒扫描一次顶层窗口，按进程名（gta-vc.exe 等）识别游戏；状态栏显示 🟢 游戏运行中 / ⚪ 未检测到。检测命中时，前台校验直接放行，无需配置关键字。</li><li>「目标窗口关键字」按<strong>窗口标题或进程名</strong>做包含匹配（不区分大小写），逗号分隔可写多个；检测不到游戏时用它兜底。</li><li>「拾取当前窗口」按钮：把当前前台窗口的标题一键填入关键字；</li><li>每个字符发送前都会复查前台窗口是否还是同一个 HWND，切屏即中止，绝不把秘籍打进别的窗口。</li></ul>
+<h2>六、注入自检</h2>
+<p>点主界面「注入自检」：工具会短暂弹出一个约 1 秒的小窗（隐藏原生 Win32 窗口），自动输入 <code>ASPIRINE</code> 并回读校验，toast + 日志报告结果。</p>
+<blockquote>为什么不用 Tk 文本框做验证：Tk 的窗口自行管理输入法上下文，在中文 IME 环境下注入的扫描码会被转成 VK_PACKET（WM_KEYDOWN 229），一个字符都收不到——这是 Tk 显示层的问题，不代表注入失效（游戏走 DirectInput 读设备状态，是另一条通道）。原生窗口没有这层干扰，结果可信。</blockquote>
+<h2>七、参数调优</h2>
+<table><thead><tr><th>参数</th><th>默认</th><th>说明</th></tr></thead><tbody>
+<tr><td>每字间隔</td><td>45ms</td><td>游戏按帧轮询键盘，<strong>发太快会丢字</strong>（一个字符同一帧内按下又抬起会被整帧漏掉）。出现丢字 → 调到 60~100ms；低帧率/决定版建议 60ms+（或直接用「决定版」预设）</td></tr>
+<tr><td>单条间隔覆盖</td><td>跟随全局</td><td>编辑秘籍时可为单条单独设 20–300ms（如超长代码 <code>OURGODGIVENRIGHTTOBEARARMS</code> 设 80ms 更稳），不影响其他秘籍</td></tr>
+<tr><td>发送前延迟</td><td>180ms</td><td>触发后等手指离开修饰键，避免 Ctrl/Shift 干扰</td></tr>
+<tr><td>绕开中文输入法</td><td>开</td><td>发送期间临时摘掉目标窗口 IME 关联，发完自动恢复</td></tr>
+<tr><td>大写发送</td><td>关</td><td>游戏对秘籍不区分大小写，小写更稳（不碰 Shift）</td></tr>
+<tr><td>悬浮提示</td><td>开</td><td>游戏内 toast；WS_EX_NOACTIVATE，绝不抢走游戏焦点</td></tr>
+</tbody></table>
+<h2>八、技术实现要点（为什么这样做）</h2>
+<ol><li><strong>SendInput + 扫描码（KEYEVENTF_SCANCODE）</strong>：GTA VC 经典版通过 DirectInput 轮询键盘设备状态，</li></ol>
+<p><code>PostMessage</code>/<code>SendKeys</code> 这类消息级输入它读不到；扫描码注入发生在键盘驱动层，DirectInput 才能看见。</p>
+<ol><li><strong>按下与抬起分两次调用，中间保持 ≥25ms</strong>：保证跨帧可读，这是"自动打字丢字"的最常见原因。</li><li><strong>RegisterHotKey 线程消息泵</strong>：注册/注销必须在同一线程完成，工具用独立泵线程 + <code>PostThreadMessage</code> 唤醒，</li></ol>
+<p>主线程（UI）通过事件队列收发，互不阻塞。</p>
+<ol><li><strong>ImmAssociateContext(hwnd, NULL)</strong>：中文键盘布局会给窗口挂 IME 输入上下文，把注入击键转成 VK_PACKET 吞掉</li></ol>
+<p>（实测不处理时目标窗口一个字符都收不到）。发送期间摘除、发完挂回。</p>
+<ol><li>全部 Windows API 通过 ctypes 直接调用，无 DLL、无注册表、无网络。</li></ol>
+<h2>九、常见问题</h2>
+<table><thead><tr><th>现象</th><th>处理</th></tr></thead><tbody>
+<tr><td>按了快捷键没反应</td><td>看状态栏：冲突 → 双击改键；前台不对 → 拾取当前窗口；游戏在读档/过场 → 回到自由画面</td></tr>
+<tr><td>提示"键盘注入失败 拒绝访问"</td><td>游戏以管理员运行 → 工具也右键"以管理员身份运行"</td></tr>
+<tr><td>秘籍输入后游戏只收到一部分字母</td><td>每字间隔调大（60~100ms），或游戏切窗口模式跑</td></tr>
+<tr><td>双击工具没反应</td><td>Python 没装或没带 tkinter：装 python.org 的 3.8+，勾选 "tcl/tk and IDLE"</td></tr>
+<tr><td>提示"工具已在运行"</td><td>已有实例在跑，看任务栏</td></tr>
+<tr><td>想恢复内置 28 条</td><td>主界面「恢复默认」按钮（自定义内容会清空）</td></tr>
+</tbody></table>
+<h2>十、文件说明</h2>
+<pre><code>vc-cheats/
+├── vc_cheat_typer.py  主程序入口（GUI + 自检 + 诊断；逻辑在 vcct/）
+├── vcct/              核心模块（const/winapi/hotkeys/store/sender/loggingx/tray/packs/importer/templates）
+├── vcct/core/         2.0 通用输入平台（门面 + targets/strategy/hooks，零 tkinter）
+├── vcct/cli.py        2.0 命令行入口
+├── run.bat            启动器（找 pythonw 后台运行）
+├── build.ps1          一键构建（单测 + ruff + PyInstaller + SHA256）
+├── README.md          本文件（中文完整文档）
+├── README.en.md       英文说明（面向国际访客）
+├── cheats.json        你的方案组 + 设置 + 统计（v3，自动生成）
+├── cheats.bak.json    上一版配置自动备份（每次保存时生成）
+├── cheats.v2.bak.json 升 v3 前的迁移前原件（永久保留，不覆盖）
+├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
+├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
+├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
+├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md  各版执行方案
+├── docs/PACK-FORMAT.md   .vcpack 秘籍包格式规范
+├── docs/MIGRATION.md    配置迁移 / 备份 / 回退说明
+├── docs/site/           离线文档站（tools/build_docs.py 生成）
+├── docs/MACOS-PORT.md    macOS 平台支持方案（需求 1.6，已暂缓）
+├── tools/build_docs.py  零依赖 md→html 文档站生成器
+├── tests/             回归测试集（python -m unittest discover -s tests）
+└── README.md          本文件</code></pre></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

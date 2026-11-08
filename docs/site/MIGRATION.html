@@ -1,0 +1,75 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MIGRATION</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>配置迁移说明（v1 → v2 → v3）</h1>
+<blockquote>适用：VC-Cheat-Typer v1.9｜实现：<code>vcct/store.py</code> 的 <code>migrate_store()</code> 及其逐级函数</blockquote>
+<h2>1. 版本矩阵</h2>
+<table><thead><tr><th>程序版本</th><th>配置版本</th><th>读旧配置</th><th>回退路径</th></tr></thead><tbody>
+<tr><td>v1.5 及更早</td><td>v1（顶层 <code>cheats</code> 单列表）</td><td>—</td><td>—</td></tr>
+<tr><td>v1.6 / 1.7 / 1.8</td><td>v2（<code>profiles</code> 多方案）</td><td>✅ 自动迁移 v1</td><td>覆盖旧 exe</td></tr>
+<tr><td><strong>v1.9</strong></td><td><strong>v3</strong></td><td>✅ 自动迁移 v1 / v2 + 备份</td><td><code>--export-v2</code> 或界面「导出 v2 兼容配置」</td></tr>
+<tr><td>更高版本</td><td>&gt; v3</td><td>❌ 明确拒绝</td><td>见 §5</td></tr>
+</tbody></table>
+<p><strong>三条铁律</strong></p>
+<ol><li>配置只升不降，但<strong>必须留显式出口</strong>：任何升版自动备份迁移前原件，并提供 <code>--export-v2</code>；</li><li>新字段一律可选：缺省 = 旧行为。允许「程序新、配置旧」，<strong>不允许「程序旧、配置新」静默降级</strong>；</li><li>迁移函数纯化：<code>migrate_store(raw) -&gt; dict</code> 不碰文件系统、不改入参、不写全局，便于回归测试。</li></ol>
+<h2>2. 结构差异</h2>
+<pre><code>v1  { version:1, settings, cheats[] }
+ ↓  migrate_v1_to_v2：顶层 cheats 包成 profiles[0] = {name:&quot;默认&quot;, cheats}
+v2  { version:2, settings, active_profile, profiles[], stats, today, games? }
+ ↓  migrate_v2_to_v3：补 packs / ui / profiles[].game
+v3  { version:3, settings, active_profile, profiles[].{name,cheats,game},
+      stats, today, games?, packs[], ui{} }</code></pre>
+<p>新增字段（全部可选）：</p>
+<table><thead><tr><th>字段</th><th>用途</th><th>缺省</th></tr></thead><tbody>
+<tr><td><code>profiles[].game</code></td><td>方案绑定的游戏模板</td><td><code>VC 经典版</code></td></tr>
+<tr><td><code>cheats[].verified</code></td><td>是否实机验证（false 在 UI 灰显）</td><td><code>true</code></td></tr>
+<tr><td><code>cheats[].game</code> / <code>source_pack</code></td><td>来源标记，仅记录、不参与逻辑</td><td><code>""</code></td></tr>
+<tr><td><code>packs[]</code></td><td>已安装 .vcpack 记录（名称/作者/游戏/版本/校验/时间）</td><td><code>[]</code></td></tr>
+<tr><td><code>ui</code></td><td>窗口位置 <code>geometry</code> + 列宽 <code>column_widths</code></td><td><code>{}</code></td></tr>
+<tr><td><code>history</code></td><td>v1.9.1 发送历史：最近 50 次（时间/名称/代码/方案/结果/耗时/说明）</td><td><code>[]</code></td></tr>
+<tr><td><code>targets</code></td><td>v2.0 通用目标规则（name/match/require_foreground/ime_policy/strategy_ref/profile_ref）</td><td><code>[]</code></td></tr>
+<tr><td><code>strategies</code></td><td>v2.0 具名发送策略表</td><td><code>{}</code></td></tr>
+</tbody></table>
+<p><code>games</code> 是 1.8 引入的 v2 可选字段，v3 原样保留；<code>targets</code> 非空时优先于 <code>games</code>。 <code>settings.hooks_enabled</code> 默认 <code>False</code>（扩展点关闭）。</p>
+<blockquote>v1.9.1 <strong>不升配置版本</strong>：<code>history</code> 是 v3 可选字段，缺省空列表；<code>to_v2()</code> 会剥离它，因此 <code>--export-v2</code> 产物仍可被 1.6/1.7/1.8 读取。旧程序读到 v1.9.1 配置时同样安全忽略 <code>history</code>。</blockquote>
+<h2>3. 升级时发生了什么</h2>
+<p><code>load_store()</code> 读取 <code>cheats.json</code>：</p>
+<ol><li>解析失败 / 顶层不是对象 → 原文件隔离为 <code>cheats.corrupt-&lt;时间戳&gt;.json</code>，载入默认表并弹窗；</li><li><code>_version_of(raw)</code> 推断版本（缺 <code>version</code> 时按结构猜：有 <code>profiles</code> = v2，有顶层 <code>cheats</code> = v1）；</li><li><strong>若版本低于 3</strong>：先 <code>backup_before_migration()</code> 把<strong>迁移前原件</strong>复制为 <code>cheats.v2.bak.json</code>（v1 则是 <code>cheats.v1.bak.json</code>），同名备份已存在时不覆盖——永远保留第一次的原件；</li><li>走 <code>migrate_store()</code> 串行链，再 <code>normalize_store()</code> 做字段白名单 / 默认值 / 方案名去重；</li><li>下一次 <code>persist()</code> 才把 v3 结构写回 <code>cheats.json</code>；每次保存照旧留上一版 <code>cheats.bak.json</code>。</li></ol>
+<blockquote>备份层次别混淆：<code>cheats.v2.bak.json</code> = <strong>升版前原件</strong>（永久保留）；<code>cheats.bak.json</code> = <strong>上一次保存</strong>（滚动覆盖）。</blockquote>
+<h2>4. 失败与回滚</h2>
+<table><thead><tr><th>情况</th><th>行为</th><th>恢复方式</th></tr></thead><tbody>
+<tr><td>迁移函数抛异常</td><td>不写盘、不覆盖原文件；载入默认表</td><td>手工把 <code>cheats.v2.bak.json</code> 改回 <code>cheats.json</code></td></tr>
+<tr><td>保存失败（只读目录/权限）</td><td>打印 + 写日志，不中断程序</td><td>检查目录权限；程序会自动回退到 <code>%LOCALAPPDATA%</code></td></tr>
+<tr><td>想退回 1.8</td><td>用 <code>--export-v2</code> 导出或直接改文件名</td><td><code>VC-Cheat-Typer.exe --export-v2 [路径]</code> / 界面「⋯ 更多 → 导出 v2 兼容配置」</td></tr>
+</tbody></table>
+<p>CLI 出口：</p>
+<pre><code>VC-Cheat-Typer.exe --export-v2                :: 默认写到 cheats.v2.json
+VC-Cheat-Typer.exe --export-v2 D:\backup.json :: 指定路径</code></pre>
+<p><code>to_v2()</code> 会剥掉 <code>packs</code> / <code>ui</code> / <code>verified</code> / <code>game</code> / <code>source_pack</code>，把 <code>version</code> 写回 2，保留 <code>games</code>（旧程序安全忽略），<strong>不会覆盖当前 v3 配置</strong>。</p>
+<h2>5. 读到更高版本（防静默降级）</h2>
+<p>若 <code>version &gt; 3</code>：</p>
+<ul><li><code>load_store()</code> 给出可读提示「配置来自更新版本（vX），本程序最高支持 v3，请升级程序」，界面弹窗；</li><li>本次载入默认秘籍表，且设置 <code>_FORBID_DEFAULT_SAVE</code> —— <strong><code>save_store()</code> 拒绝回写默认路径</strong>，避免用默认数据覆盖用户的新版配置；</li><li><code>migrate_store()</code> 直接抛 <code>StoreTooNew(found, current)</code>；</li><li>导入整包时同样拒绝（<code>parse_bundle</code> 返回明确错误）。</li></ul>
+<p>处理：升级程序；或把 <code>cheats.json</code> 改名保存，再用 <code>--export-v2</code> 从新版程序导出兼容副本。</p>
+<h2>6. 回归样本</h2>
+<p><code>tests/test_v3_store.py</code> 固定 5 份历史形态配置做迁移零丢失回归：</p>
+<ol><li>标准 v1（自定义间隔 + 1 条秘籍）；</li><li>标准 v2（多字段：方案 / 统计 / 当日 / games 规则）；</li><li>空 v1（无 cheats）；</li><li>v2 重名方案（验证方案名去重）；</li><li>v2 无 <code>app</code> 字段 + 关闭的 games 规则。</li></ol>
+<p>另测：备份只生成一次、更高版本不回写、v3 往返、bundle 拒绝更新版本、<code>to_v2</code> 字段剥离。</p>
+<h2>7. 第三方 / 手写配置建议</h2>
+<ul><li>不写 <code>version</code> 也能读（按结构推断），但建议显式写 <code>3</code>；</li><li>未知字段会被忽略，不会报错；</li><li>只想分享秘籍请用 <code>.vcpack</code>（见 <code>docs/PACK-FORMAT.md</code>），不要手改 <code>cheats.json</code>。</li></ul></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

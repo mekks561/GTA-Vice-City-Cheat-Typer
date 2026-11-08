@@ -1,0 +1,167 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PLAN-1.7</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer 1.7 开发方案（执行版）</h1>
+<blockquote>基线：v1.6（commit <code>d1d7eb4</code>，<code>vc_cheat_typer.py</code> 2900 行 / 45 条单测 / CI 全绿） 日期：2026-11-07 ｜ 目标发布：2026-11-24 上游：<code>docs/ROADMAP-1.7-2.0.md</code>（本文档修正了其中的任务顺序与一处错误判断）</blockquote>
+<p><strong>执行状态（随进度更新）</strong></p>
+<ul><li>✅ T-01 ~ T-03：2026-11-07 交付，commit <code>d083a81</code>。主文件 2900 → 1709 行；新增 <code>vcct/</code> 六个模块（const / winapi / hotkeys / store / loggingx / sender 骨架）；单测 45 → <strong>52</strong> 条；ruff 0 告警；<code>--selftest</code> 6 项全过；异目录启动正常。</li><li>✅ T-04：2026-11-07 交付，commit <code>3bfecaf</code>。<code>type_text</code> + <code>SendCancelled</code>/<code>SendError(ValueError)</code>/<code>for_code</code>；六条约定各有单测；单测 52 → <strong>71</strong> 条。</li><li>✅ T-05 ~ T-08：2026-11-07 交付，commit <code>2a52449</code>。停止按钮/Esc 状态机、暂停中止在飞、残键兜底（finally + release_modifiers）、去抖 250ms、SEND 质量日志、线程启动失败归还锁；<code>build/gui_test_1_7.py</code> 15 项接线测试全过；GUI 冒烟进单测（无图形环境自动跳过）；单测 → <strong>72</strong> 条。</li><li>📝 T-09 调整：单测已 72 条（≥55 达标）；<strong>selftest 不再加纯逻辑项</strong>——selftest 的价值是端到端诊断真机环境，取消逻辑已被 19 条假函数单测覆盖，往 selftest 里塞一遍重复断言只增加运行时长。此项按原目标（覆盖到位）视为达成。</li><li>✅ T-10：2026-11-07 交付。APP_VER 1.7、README v1.7 章节、打包 + SHA256 + Release。</li></ul>
+<hr>
+<h2>零、先修正一条错误判断（重要）</h2>
+<p><code>ROADMAP-1.7-2.0.md</code> 里写「连按两个热键会起两条 worker 同时 SendInput，输出交错成乱码」，<strong>这个判断是错的</strong>。</p>
+<p>审计结果：<code>CheatApp.__init__</code> 第 1544 行已有 <code>self.sending = threading.Lock()</code>，<code>_start_send</code>（2217–2223）用 <code>acquire(blocking=False)</code> 非阻塞抢占，抢不到就丢弃并记日志。<strong>并发交错不存在。</strong></p>
+<p>由此 1.7-B「单飞」从「修 bug」降级为「补短板」，真正缺的是：</p>
+<table><thead><tr><th>真实缺口</th><th>证据</th><th>后果</th></tr></thead><tbody>
+<tr><td><strong>无法取消</strong></td><td>全文无 <code>Event</code> 停止标志，<code>_send_worker</code> 的 for 循环只受 <code>check_fg</code> 约束</td><td>18 字符发到一半发现错了，只能等它打完</td></tr>
+<tr><td><strong>暂停不中止在飞发送</strong></td><td><code>toggle_pause</code>（2175）只做 <code>apply_hotkeys()</code> 注销热键</td><td>按了「暂停」，当前这条秘籍仍会继续打完——安全语义不成立</td></tr>
+<tr><td><strong>残键无兜底</strong></td><td><code>press_key</code>（351）下压→<code>sleep</code>→抬起，中间无 <code>finally</code></td><td>抬起失败/进程被杀 → Ctrl/Shift 卡住，玩家角色一直跑</td></tr>
+<tr><td><strong>锁泄漏</strong></td><td><code>_start_send</code> 里 <code>Thread(...).start()</code> 未包 try</td><td>极端情况下线程起不来，锁永不释放，此后所有发送静默丢弃</td></tr>
+<tr><td><strong>丢弃无反馈</strong></td><td>抢占失败只 <code>self.log(...)</code></td><td>用户按了热键"没反应"，不知道是被丢弃</td></tr>
+</tbody></table>
+<p><strong>结论：1.7 的价值不是"修并发"，而是"让发送可中断、可兜底、可观测"。</strong></p>
+<hr>
+<h2>一、改动范围（三类，量化）</h2>
+<table><thead><tr><th>类别</th><th>内容</th><th>规模</th><th>风险</th></tr></thead><tbody>
+<tr><td><strong>A. 搬运</strong>（无逻辑变更）</td><td>从单文件抽出 5 个叶子模块：<code>const / winapi / store / loggingx / hotkeys</code></td><td>~1450 行移出</td><td>中（纯机械，但面大）</td></tr>
+<tr><td><strong>B. 新增</strong>（新能力）</td><td>取消引擎、残键兜底、发送状态机、质量日志、GUI 冒烟</td><td>~400–500 行</td><td>低（新增为主）</td></tr>
+<tr><td><strong>C. 修改</strong>（行为变更）</td><td>8 处既有函数</td><td>~120 行改写</td><td><strong>高</strong>（直接改发送链路）</td></tr>
+</tbody></table>
+<h3>1.1 明确<strong>不</strong>做的事（与路线图的重要偏差）</h3>
+<p><strong>不做 <code>CheatApp</code> 的类拆分。</strong> 原因：</p>
+<ul><li><code>CheatApp</code>（1531–2727，约 1200 行）是一个<strong>单窗口应用对象</strong>，它的"大"是 tk 布局代码密集，不是逻辑纠缠；</li><li>把它拆成 <code>app / dialogs / theme</code> 只是"换个文件放同样多的行"，对 1.8 的设置页改造帮助有限——那时重构 UI 本来就要重写布局；</li><li>拆 1200 行 tk 代码的回归风险，远高于拆 5 个无 UI 依赖的叶子模块。</li></ul>
+<p><strong>替代方案（strangler）</strong>：只把<strong>不依赖 tk 的部分</strong>抽走。抽完后 <code>vc_cheat_typer.py</code> 从 2900 行降到约 1500 行（只剩 UI + 入口），后续 1.8/1.9 的新逻辑（包解析、迁移链、目标规则）直接落在新模块里，不再往单文件堆。</p>
+<hr>
+<h2>二、目标模块结构</h2>
+<pre><code>vcct/
+├── __init__.py
+├── const.py      APP_NAME / APP_VER / DEFAULT_SETTINGS / PRESETS / PAUSE_ID / 配色
+├── winapi.py     ctypes 结构体与原型、INPUT、SendInput、press_key、
+│                 foreground_info、find_game_window、ImeGuard、raw_char_probe、DPI
+├── hotkeys.py    VK 表、parse/format/combo_signature、is_safe_binding、
+│                 candidate_combos、pick_free_combo、build_bindings、HotkeyEngine
+├── store.py      _norm_* / normalize_store / load_store / save_store /
+│                 bundle_payload / parse_bundle / bump_stats / touch_today / filter_cheats
+├── loggingx.py   app_dir/data_path/log_dir/log_file/append_log/_rotate_log/
+│                 _show_crash_dialog/install_crash_hooks
+└── sender.py     【新增】SendParams、SendCancelled、type_text、release_held_modifiers
+vc_cheat_typer.py  入口壳：import + CheatApp + HotkeyCapture + CheatDialog + selftest + main</code></pre>
+<p><strong>硬约束</strong>：<code>store.py</code> / <code>loggingx.py</code> 不得 import tkinter；<code>sender.py</code> 只接收注入的 <code>send_key</code> / <code>sleep</code> 回调，不直接调 <code>user32</code>（这样单测不需要真实键盘）。</p>
+<hr>
+<h2>三、具体改动点（逐处）</h2>
+<h3>3.1 搬运清单（move-only，禁止顺手改逻辑）</h3>
+<table><thead><tr><th>#</th><th>当前位置</th><th>目标</th><th>说明</th></tr></thead><tbody>
+<tr><td>M1</td><td>1–50 <code>import</code> + <code>APP_NAME/APP_VER</code></td><td><code>const.py</code></td><td><code>APP_VER</code> 同时改 <code>1.6</code> → <code>1.7</code></td></tr>
+<tr><td>M2</td><td>70–111 ctypes 结构体（<code>KEYBDINPUT</code>/<code>INPUT</code>…）</td><td><code>winapi.py</code></td><td>连同 <code>_reg</code> 原型设置（113 起）一起</td></tr>
+<tr><td>M3</td><td>113 <code>MOD_*</code>、225 <code>VK_BY_NAME</code>、1104 <code>PAUSE_ID</code>、1523 <code>C</code></td><td><code>const.py</code> / <code>hotkeys.py</code></td><td><code>VK_BY_NAME</code> 属按键域，进 hotkeys</td></tr>
+<tr><td>M4</td><td>278–330 <code>format_combo</code>/<code>parse_combo</code>/<code>combo_signature</code>/<code>is_safe_binding</code></td><td><code>hotkeys.py</code></td><td>纯函数，零依赖</td></tr>
+<tr><td>M5</td><td>332–460 <code>_key_item</code>/<code>_send</code>/<code>press_key</code>/<code>foreground_info</code>/<code>is_key_down</code>/<code>find_game_window</code></td><td><code>winapi.py</code></td><td>—</td></tr>
+<tr><td>M6</td><td>454–604 <code>ImeGuard</code>/<code>force_foreground</code>/<code>raw_char_probe</code></td><td><code>winapi.py</code></td><td>—</td></tr>
+<tr><td>M7</td><td>604–678 <code>HotkeyEngine</code></td><td><code>hotkeys.py</code></td><td>—</td></tr>
+<tr><td>M8</td><td>682–750 <code>DEFAULT_SETTINGS</code>/<code>PRESETS</code>/<code>_c</code>/<code>default_cheats</code></td><td><code>const.py</code></td><td>—</td></tr>
+<tr><td>M9</td><td>751–875 路径/日志/崩溃钩子</td><td><code>loggingx.py</code></td><td>—</td></tr>
+<tr><td>M10</td><td>875–1258 归一化/存取/整包/统计/过滤/绑定构造</td><td><code>store.py</code> + <code>hotkeys.py</code></td><td><code>build_bindings</code>/<code>candidate_combos</code>/<code>pick_free_combo</code> 进 hotkeys</td></tr>
+<tr><td>M11</td><td>1226–1258 <code>enable_dpi_awareness</code>/<code>ui_scale</code></td><td><code>winapi.py</code></td><td>—</td></tr>
+</tbody></table>
+<p><strong>shim 兼容</strong>：<code>vc_cheat_typer.py</code> 顶部保留</p>
+<pre><code>from vcct.const import *      # noqa: F401,F403
+from vcct.store import *      # noqa: F401,F403
+from vcct.hotkeys import *    # noqa: F401,F403
+from vcct.winapi import *     # noqa: F401,F403</code></pre>
+<p>目的：<code>run.bat</code>、PyInstaller <code>--name</code>、README 路径、<code>tests/test_core.py</code> 的 45 条旧 import <strong>全部不用改</strong>；同时加一条断言测试 <code>vc_cheat_typer.parse_combo is vcct.hotkeys.parse_combo</code>，防止 shim 与实现分叉。</p>
+<h3>3.2 新增：发送引擎 <code>vcct/sender.py</code></h3>
+<pre><code>@dataclass(frozen=True)
+class SendParams:
+    code: str
+    interval_ms: int = 45
+    hold_ms: int = 25
+    pre_delay_ms: int = 180
+    uppercase: bool = False
+
+class SendCancelled(Exception):
+    def __init__(self, sent: int, total: int): ...
+
+def type_text(p: SendParams, stop: threading.Event, *,
+              send_key,                     # (vk:int, down:bool) -&gt; None
+              sleep=time.sleep,
+              on_progress=None) -&gt; int:
+    &quot;&quot;&quot;逐字符注入。stop 置位即中止；中止时保证已按下的键全部抬起，抛 SendCancelled。&quot;&quot;&quot;</code></pre>
+<p><strong>关键实现约定</strong>（每条都要有对应单测）：</p>
+<ol><li><strong>可中断睡眠</strong>：<code>sleep</code> 切成 ≤20ms 的片，片间检查 <code>stop</code> —— 否则设了 100ms 间隔，用户按停止还要等 100ms 才响应。</li><li><strong>字符前检查</strong>：<code>for i, ch in enumerate(code)</code> 循环体第一句 <code>if stop.is_set(): raise SendCancelled(i, len(code))</code>。</li><li><strong>按键必抬起</strong>：<code>send_key(vk, True)</code> 后立刻 <code>try: sleep(hold) finally: send_key(vk, False)</code> —— 即使中途异常也抬起。</li><li><strong>非法字符</strong>：<code>VK_BY_NAME</code> 查不到 → 抛 <code>ValueError(f"非法字符 {ch!r}")</code>，异常前已按下的键同样走 finally 抬起。</li><li><strong><code>pre_delay</code> 也可中断</strong>：用户在 180ms 前置延迟里按停止，应当 0 字符、不留痕迹。</li><li><strong>不做任何 tk/Win32 直接调用</strong>：全部经注入的 <code>send_key</code>，单测用假函数即可断言调用序列。</li></ol>
+<h3>3.3 修改清单（行为变更，按风险从高到低）</h3>
+<table><thead><tr><th>#</th><th>位置</th><th>现状</th><th>改为</th><th>为什么</th></tr></thead><tbody>
+<tr><td>C1</td><td><code>_send_worker</code> 2238–2298</td><td>循环内手工 <code>press_key</code> + <code>time.sleep</code> + 三处 <code>return</code></td><td>改为调用 <code>sender.type_text(...)</code>，只保留「前台校验 / IME 守卫 / 成功日志 / 统计」这些外围职责</td><td>让可测逻辑与 UI 解耦；三处 <code>return</code> 收敛为一处 <code>except SendCancelled</code></td></tr>
+<tr><td>C2</td><td><code>_start_send</code> 2217–2223</td><td><code>acquire()</code> 后直接起线程</td><td>加 <code>self._stop.clear()</code>、<code>self._inflight = cheat</code>、<code>Thread.start()</code> 包 <code>try/except</code>（失败则 <code>release()</code>）；抢占失败改为 <strong>toast + 日志</strong> 双通道</td><td>修锁泄漏；让"丢弃"可见</td></tr>
+<tr><td>C3</td><td><code>__init__</code> 1544 附近</td><td>只有 <code>self.sending</code></td><td>增 <code>self._stop = threading.Event()</code>、`self._inflight: dict \</td><td>None = None`</td><td>状态机基础</td></tr>
+<tr><td>C4</td><td><code>toggle_pause</code> 2175</td><td>只 <code>apply_hotkeys()</code></td><td>先 <code>if self.paused: self._stop.set()</code> 再注销热键；恢复时不重置</td><td><strong>安全语义</strong>：暂停 = 立即停止一切注入</td></tr>
+<tr><td>C5</td><td><code>press_key</code> 351（搬入 winapi 时）</td><td>上下压无 finally</td><td>keyup 放 <code>finally</code>；新增 <code>release_held_modifiers(is_down, send_key)</code></td><td>残键兜底</td></tr>
+<tr><td>C6</td><td><code>on_close</code> 2706</td><td>直接销毁</td><td><code>self._stop.set()</code> → <code>join</code> 最多 300ms → <code>release_held_modifiers()</code> → 销毁</td><td>关程序不留卡键</td></tr>
+<tr><td>C7</td><td>工具栏「发送所选」按钮</td><td>固定文案</td><td>发送中变「■ 停止」并置为可用，结束恢复</td><td><strong>不加新控件</strong>（1.6 已因工具栏溢出踩过 R3），复用现有按钮位</td></tr>
+<tr><td>C8</td><td>根窗口 <code>&lt;Escape&gt;</code></td><td>无绑定</td><td>绑定 <code>stop_send()</code>；弹窗内 Esc 优先关闭弹窗</td><td>键盘用户的快速出口</td></tr>
+</tbody></table>
+<h3>3.4 设置项改动（易漏）</h3>
+<p><code>save_store</code>（1033 起）会把 settings <strong>过滤成只保留 <code>DEFAULT_SETTINGS</code> 里存在的键</strong>。因此新增任何设置项（如 <code>debounce_ms</code>、<code>stop_on_pause</code>）必须<strong>同时</strong>加入 <code>DEFAULT_SETTINGS</code>，否则保存一次就被丢弃。</p>
+<p>1.7 新增设置项（均为 v2 可选字段，不升 <code>STORE_VERSION</code>）：</p>
+<pre><code>&quot;debounce_ms&quot;: 250,        # 同一秘籍连按去抖窗口
+&quot;stop_on_pause&quot;: True,     # 暂停时中止在飞发送（安全默认）</code></pre>
+<h3>3.5 日志增强（<code>loggingx</code> + <code>_send_worker</code> 尾部）</h3>
+<p>发送完成/取消/失败各记一行结构化日志：</p>
+<pre><code>SEND ok   name=满血 code=ASPIRINE chars=8 interval=45ms hold=25ms
+          planned=540ms actual=562ms dev=+4.1%
+SEND cancel name=坦克 code=PANZER sent=3/6 at_char=4 elapsed=310ms
+SEND fail reason=fg_lost name=坦克 code=PANZER sent=3/6</code></pre>
+<p>偏差 &gt;15% 时打 <code>WARN</code>（对应 1.7-F 验收）。这条日志是<strong>真机丢字问题唯一可远程诊断的手段</strong>——用户贴一行就能判断是间隔太短还是权限问题。</p>
+<hr>
+<h2>四、优先级任务（可直接开工）</h2>
+<table><thead><tr><th>ID</th><th>任务</th><th>优先级</th><th>估时</th><th>依赖</th><th>完成定义（DoD）</th></tr></thead><tbody>
+<tr><td><strong>T-01</strong></td><td>抽 <code>const.py</code> + <code>winapi.py</code>（M1–M3、M5–M6、M11）</td><td><strong>P0</strong></td><td>1.0d</td><td>—</td><td>2900 → ~2200 行；45 单测 + selftest 全过；搬运提交无逻辑改动</td></tr>
+<tr><td><strong>T-02</strong></td><td>抽 <code>store.py</code> + <code>loggingx.py</code>（M9–M10）</td><td><strong>P0</strong></td><td>1.0d</td><td>T-01</td><td>同上；<code>store/loggingx</code> 不 import tkinter（加断言测试）</td></tr>
+<tr><td><strong>T-03</strong></td><td>抽 <code>hotkeys.py</code>（M4、M7、M10 部分）+ 建 <code>sender.py</code> 空壳</td><td><strong>P0</strong></td><td>1.0d</td><td>T-02</td><td><code>HotkeyEngine</code> 平移后热键注册数仍为 28、0 冲突</td></tr>
+<tr><td><strong>T-04</strong></td><td>实现 <code>type_text</code> + <code>SendCancelled</code>（B 核心）</td><td><strong>P0</strong></td><td>1.0d</td><td>T-03</td><td>新增 ≥10 条单测覆盖 §3.2 六条约定；假 <code>send_key</code> 断言调用序列</td></tr>
+<tr><td><strong>T-05</strong></td><td>接线：C1 改造 + C2/C3/C7/C8（停止按钮、Esc、状态机）</td><td><strong>P0</strong></td><td>0.8d</td><td>T-04</td><td>界面「停止」可在任意时刻中断；按钮文案随状态切换</td></tr>
+<tr><td><strong>T-06</strong></td><td>暂停中止在飞发送（C4）+ 残键兜底（C5/C6）</td><td><strong>P0</strong></td><td>0.6d</td><td>T-05</td><td>发送中按 <code>Ctrl+Alt+P</code> → 立即停且无残键；关闭窗口同理</td></tr>
+<tr><td><strong>T-07</strong></td><td>单飞完善 + 发送质量日志（C2 剩余 + §3.5）</td><td>P1</td><td>0.6d</td><td>T-05</td><td>抢占失败有 toast；日志含 planned/actual/dev</td></tr>
+<tr><td><strong>T-08</strong></td><td>GUI 冒烟进 CI（<code>tests/test_gui_smoke.py</code>）</td><td>P1</td><td>0.8d</td><td>T-03</td><td>Actions 出现 <code>gui-smoke</code> job，非阻塞</td></tr>
+<tr><td><strong>T-09</strong></td><td>单测补齐 ≥55 + selftest 增 <code>[7] 取消与时序</code></td><td>P1</td><td>0.6d</td><td>T-04~T-06</td><td><code>--selftest</code> 连跑 3 次全过</td></tr>
+<tr><td><strong>T-10</strong></td><td>README/CHANGELOG、打包、SHA256、Release v1.7</td><td><strong>P0</strong></td><td>1.0d</td><td>全部</td><td>资产齐全，tag <code>v1.7</code></td></tr>
+</tbody></table>
+<p><strong>合计 8.4 人日</strong>（比路线图的 9.5 少，因为砍掉了 <code>CheatApp</code> 大拆）。按 11/07 起每天 2–3h，到 11/24 有 17 天 ≈ 34–50h，<strong>工期成立但缓冲很薄</strong>——所以 T-07/T-08 是唯一可牺牲项，P0 六项不可动。</p>
+<h3>4.1 为什么先搬运再加功能（与路线图顺序相反）</h3>
+<p>原路线图是「先做 A/B/C 功能，再拆包」。审计后改为<strong>先搬后加</strong>，理由：</p>
+<ol><li><strong>搬运营造"零差异基线"</strong>：搬运阶段行为必须完全一致，任何测试失败都只有"搬错了"一个原因，定位成本最低；</li><li><strong>避免二次搬运</strong>：先写取消功能再拆包，等于把新代码再搬一遍，且搬运提交里混入新逻辑，"move-only 可验证"这个安全前提就废了；</li><li><strong>单测能直接对着新模块写</strong>：<code>type_text</code> 一旦落在 <code>vcct/sender.py</code>，测试 import 路径稳定，不会因后续搬迁再改。</li></ol>
+<p>代价是前 3 天没有可见进展 —— 这是有意接受的投资。</p>
+<hr>
+<h2>五、验证矩阵与回滚</h2>
+<h3>5.1 自动验证（每次提交）</h3>
+<table><thead><tr><th>项</th><th>命令</th><th>门槛</th></tr></thead><tbody>
+<tr><td>静态检查</td><td><code>uvx ruff check .</code></td><td>0 告警</td></tr>
+<tr><td>单元测试</td><td><code>python -m unittest discover -s tests</code></td><td>45 → <strong>≥55</strong> 条全过</td></tr>
+<tr><td>内置自检</td><td><code>python vc_cheat_typer.py --selftest</code></td><td>6 → <strong>7</strong> 项全过，连跑 3 次</td></tr>
+<tr><td>编译</td><td><code>python -m py_compile</code></td><td>通过</td></tr>
+<tr><td>导入隔离</td><td>新增断言</td><td><code>store</code>/<code>loggingx</code> 的 <code>sys.modules</code> 无 <code>tkinter</code></td></tr>
+</tbody></table>
+<h3>5.2 人工验证（发布门槛，必须逐条走）</h3>
+<ol><li>发送 18 字符秘籍，中途点「停止」→ 立刻停，剩余字符零输出，<strong>无残留修饰键</strong>（在记事本按 Ctrl 观察）</li><li>发送中途按 <code>Ctrl+Alt+P</code> → 立即停止 + 热键全注销；再按一次 → 恢复且能正常发送</li><li>发送中途点窗口关闭 → 进程退出，键盘无卡键</li><li>同一热键 200ms 内连按两次 → 只发一条（去抖生效）</li><li>不同热键连续按 → 第二条被丢弃时<strong>有 toast 提示</strong>（不是静默）</li><li>发送时切走窗口 → 按现有逻辑中止并提示</li><li>游戏内实测 F1/F8 各 3 次，全中</li><li>100%/125%/150% 三档截图复查（确认「停止」按钮文案切换未挤坏布局）</li></ol>
+<h3>5.3 回滚策略</h3>
+<ul><li>每个搬运任务 <strong>单独一个 commit</strong>，commit message 前缀 <code>refactor(1.7):</code>，且该 commit 内 <strong>diff 只允许移动/import 变化</strong>；</li><li>每个 T-0x 完成后打轻量 tag（<code>v1.7-step1</code> … <code>v1.7-step6</code>）；</li><li>任一环节回归失败 → <code>git revert &lt;该 commit&gt;</code> 回到上一个可发布点，不影响后续功能开发；</li><li>发布前保留 <code>v1.6</code> 的 <code>dist/VC-Cheat-Typer.exe</code>，必要时可原地回退给用户。</li></ul>
+<hr>
+<h2>六、1.7 不做（防止范围膨胀）</h2>
+<ul><li><code>CheatApp</code> 类拆分、UI 框架更换 → 推迟到 1.8 做设置页时顺带</li><li>托盘、自动切方案、向导（属 1.8）</li><li>秘籍包格式、配置 v3（属 1.9）</li><li>macOS 后端（需求 1.6 已暂缓，见 <code>docs/MACOS-PORT.md</code>）</li><li>发送策略引擎（属 2.0，1.7 只做"能取消"，不做"自适应间隔"）</li></ul>
+<hr>
+<h2>七、一句话</h2>
+<p><strong>1.7 = 把 1450 行无 UI 依赖的代码搬出单文件（先立地基），再在新地基上加「随时能停、停了不留残键、暂停立即生效」三件事。</strong> 不追求新功能，只追求"按下去可控、停下来干净、出问题能查"。</p></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

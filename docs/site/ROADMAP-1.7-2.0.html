@@ -1,0 +1,256 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ROADMAP-1.7-2.0</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer 1.7 → 2.0 路线规划</h1>
+<blockquote>基线：v1.6（commit <code>7307be2</code>，2026-11-05 发布）｜ 规划日期：2026-11-05 文档性质：执行用规划，任务可直接拆为 issue / 提交 上游文档：<code>docs/ROADMAP-1.6.md</code>（已完成）</blockquote>
+<hr>
+<h2>零、现状基线（规划的出发点）</h2>
+<table><thead><tr><th>维度</th><th>现状</th><th>对路线的影响</th></tr></thead><tbody>
+<tr><td>代码结构</td><td><code>vc_cheat_typer.py</code> 单文件 <strong>2900 行</strong>，<code>CheatApp</code> 单类约 1200 行</td><td>加功能的边际风险快速上升 → <strong>1.7 必须先解耦</strong>，否则 1.8 的 UI 改动不敢做</td></tr>
+<tr><td>依赖</td><td>零第三方运行时依赖（tkinter + ctypes 手写 Win32）</td><td>这是核心资产（免装环境、杀软面小、可审计）→ <strong>全线不引入 pip 运行时依赖</strong></td></tr>
+<tr><td>测试</td><td>45 条单测（纯函数）+ <code>--selftest</code>；<code>build/gui_test.py</code> 21 项<strong>仅本地</strong>，且 <code>build/</code> 会被清理</td><td>GUI 回归无 CI 保护 → 1.7 补</td></tr>
+<tr><td>输入链路</td><td><code>SendInput</code> 逐字符 fire-and-forget；<strong>无取消、无并发保护</strong></td><td>连按两个热键会交错出乱码 → 1.7 P0</td></tr>
+<tr><td>配置</td><td><code>version: 2</code>，字段可选即兼容</td><td>1.7/1.8 保持 v2；1.9 升 v3 并留降级出口</td></tr>
+<tr><td>检测能力</td><td><code>find_game_window()</code> 每 3s 枚举窗口，<strong>仅用于状态显示/放行</strong></td><td>已具备"切方案"的原料，1.8 只差规则表</td></tr>
+<tr><td>UI 密度</td><td>工具栏两行 + 「⋯ 更多」菜单（1.6 因挤爆才收进去）</td><td>已到 tk 布局极限 → 1.8 改设置对话框</td></tr>
+<tr><td>1.6 遗留</td><td>P2 四项全未做：发送中取消、英文 README、<code>build.ps1</code>、游戏自动切方案</td><td>直接成为 1.7/1.8 的输入</td></tr>
+</tbody></table>
+<p><strong>版本主线</strong>：<code>1.7 拆得开</code> → <code>1.8 用得顺</code> → <code>1.9 装得下</code> → <code>2.0 拎得走</code>。</p>
+<hr>
+<h2>一、版本全景</h2>
+<table><thead><tr><th>版本</th><th>一句话定位</th><th>关键词</th><th>目标发布</th></tr></thead><tbody>
+<tr><td><strong>v1.7</strong></td><td>输入可靠 + 工程解耦</td><td>不新增功能面，把「按下去就一定出字」和「代码能改得动」两件事做扎实</td><td>2026-11-24（周二）</td></tr>
+<tr><td><strong>v1.8</strong></td><td>场景化与可用性</td><td>打开就能用：托盘常驻、按游戏自动切方案、设置收进独立对话框</td><td>2026-12-22（周二）</td></tr>
+<tr><td><strong>v1.9</strong></td><td>内容可流通</td><td>秘籍包（.vcpack）、多游戏模板、批量编辑、配置 v3</td><td>2027-01-20（周三）</td></tr>
+<tr><td><strong>v2.0</strong></td><td>通用输入平台</td><td>核心库独立、发送策略引擎、目标应用规则化、文档站</td><td>2027-05-31（周一）</td></tr>
+</tbody></table>
+<p><strong>排期约束（重要）</strong>：按单人兼职 <strong>2–3h/天</strong> 估算，<code>1 人日 = 4h 有效工时 ≈ 2 个自然日</code>。 <strong>2027-01-21 ~ 03-10 为冻结期</strong>（迁宁波 / 求职 / 站稳），期间只出 <code>1.9.x</code> 补丁，不开新功能。若 3 月入职后工时降到 1–1.5h/天，v2.0 顺延至 6 月底并砍掉全部 P1。</p>
+<hr>
+<h2>二、v1.7 — 输入可靠 + 工程解耦</h2>
+<blockquote><strong>⚠ 本章部分结论已被代码审计修正，执行以 <code>docs/PLAN-1.7.md</code> 为准。</strong> 修正点：① 并发互斥已存在（<code>self.sending</code> Lock，第 1544/2218 行），「交错乱码」不成立，1.7-B 由"修 bug"降级为"补短板"； ② 任务顺序改为<strong>先搬后加</strong>（搬运营造零差异基线，避免二次搬运）； ③ 不做 <code>CheatApp</code> 类拆分（1200 行 tk 布局代码，搬运风险 &gt; 收益），只抽 5 个无 UI 依赖的叶子模块。</blockquote>
+<h3>2.1 定位与理由</h3>
+<p><strong>不新增任何面向用户的功能。</strong> 只做两件事：把发送链路做到"可信"（可取消、不交错、不留残键），把单文件拆成包（后续三个版本的改动才有地方落）。 判断依据：连按 <code>F1</code> <code>F8</code> 两个热键时，两条 worker 线程会同时 <code>SendInput</code>，输出必然交错成乱码——这是<strong>当前真实存在的 bug</strong>，不是假想需求；而 2900 行单文件已经让 1.6 的「导入方案」按钮截断这类小改都要全文件搜一遍。</p>
+<h3>2.2 必做（P0，缺一不发）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>做法</th><th>验收标准</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.7-A</td><td><strong>发送中可取消</strong>（承接 1.6 P2-L）</td><td>发送线程持有一个 <code>threading.Event</code> 停止标志；<code>Ctrl+Alt+P</code>（暂停键）与界面「停止」按钮均置位；<strong>取消时必须补发已按下未释放的键</strong>（否则 Ctrl 卡住）</td><td>18 字符秘籍发到第 5 个字符取消 → 后续零输出、无残留修饰键、日志记「已取消 5/18」</td><td>1.0d</td></tr>
+<tr><td>1.7-B</td><td><strong>发送串行化 / 单飞</strong></td><td>全局 <code>_sending</code> 锁 + 队列上限 1：发送中再触发 → 丢弃并 toast「上一条还在发」；同类热键 300ms 内连按去抖</td><td>快速连按 F1/F8/F1 → 只出现完整的一条，无交错、无半截</td><td>0.8d</td></tr>
+<tr><td>1.7-C</td><td><strong>残键自检与清理</strong></td><td>发送结束（含异常/取消路径）用 <code>GetAsyncKeyState</code> 检查我们按过的修饰键，仍处按下态则强制 <code>keyup</code>；封装为 <code>release_pressed_modifiers()</code> 单一出口</td><td>发送中强杀线程模拟异常 → 装饰键不粘连；记事本按 Ctrl 无异常</td><td>0.8d</td></tr>
+<tr><td>1.7-D</td><td><strong>模块拆分（纯搬运）</strong></td><td>拆为 <code>vcct/</code>：<code>winapi.py</code>（ctypes 结构/SendInput/IME/前台）、<code>hotkeys.py</code>（解析/注册/候选键）、<code>store.py</code>（归一化/加载/保存/迁移/整包）、<code>loggingx.py</code>（日志/滚动/崩溃钩子）、<code>sender.py</code>（发送链路）、<code>ui/</code>（app、dialogs、theme）；根目录 <code>vc_cheat_typer.py</code> 保留为入口壳（<code>main</code> + <code>--selftest</code>），exe 名/<code>run.bat</code>/文档路径不变</td><td>45 条单测 + selftest + GUI 21 项全过；<code>git log</code> 中搬运提交<strong>不含任何逻辑改动</strong>（move-only）；<code>ruff</code> 0 告警</td><td>2.5d</td></tr>
+<tr><td>1.7-E</td><td><strong>GUI 回归进 CI</strong></td><td><code>tests/test_gui_smoke.py</code>：临时 store → 实例化 <code>CheatApp</code> → <code>update()</code> 后断言 8 列表头、28 条秘籍、热键注册数、暂停切换；先以 <code>continue-on-error: true</code> 挂非阻塞 job</td><td>PR/push 后 Actions 出现 <code>gui-smoke</code>；连续 2 周不 flaky 后转阻塞</td><td>0.8d</td></tr>
+<tr><td>1.7-F</td><td><strong>发送质量日志</strong></td><td>记录每条秘籍的计划/实测耗时、每字符实际间隔、是否触发取消/去抖；日志页可看到最近 20 条</td><td>实测耗时与「字符数 × interval」偏差 ≤15% 时有 WARN</td><td>0.5d</td></tr>
+</tbody></table>
+<h3>2.3 可选（P1，有余量再做）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.7-G</td><td>英文 README（承接 1.6 P2-M）</td><td><code>README.en.md</code> + 界面截图；面向 GitHub 国际访客，不做多语言 UI</td><td>0.6d</td></tr>
+<tr><td>1.7-H</td><td><code>build.ps1</code> 一键构建（承接 1.6 P2-N）</td><td>打包 + SHA256 + 版本号注入（<code>APP_VER</code> 从 git tag 读）</td><td>0.4d</td></tr>
+<tr><td>1.7-I</td><td>onedir 包对照评估</td><td>启动速度、体积、误报率对比 onefile，只出结论不换形态</td><td>0.4d</td></tr>
+</tbody></table>
+<h3>2.4 技术与架构变更</h3>
+<ul><li>新增包结构 <code>vcct/</code>，<code>pyproject.toml</code> 补 <code>[project] packages</code> 与 <code>[project.scripts] vcct</code>（此时仅内部使用，不发布 PyPI）。</li><li>发送链路从「热键线程直接调 <code>send_text()</code>」改为「热键 → 投递请求 → 单飞消费者执行」，为 2.0 的 <code>Sender</code> 抽象留位。</li><li>不新增依赖；不引入 asyncio/线程池重构（tk 主线程模型不变）。</li></ul>
+<h3>2.5 风险</h3>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解</th></tr></thead><tbody>
+<tr><td>R1.1</td><td>拆分引入隐性回归（模块间循环引用、全局状态搬家走样）</td><td>高 / 高</td><td>严格 move-only 提交 + 拆分后立即跑全量回归；<code>git diff --stat</code> 人工核对仅移动</td></tr>
+<tr><td>R1.2</td><td>取消时补发 keyup 的时序与游戏帧错位，仍可能残余态</td><td>中 / 中</td><td>取消后额外发一次"全修饰键抬起"兜底；真机验证第 1 项</td></tr>
+<tr><td>R1.3</td><td>GitHub Windows runner 无交互桌面，Tk 建窗可能失败</td><td>中 / 低</td><td>job 先 <code>continue-on-error</code>；失败自动降级为"仅 import + 纯逻辑"断言</td></tr>
+<tr><td>R1.4</td><td>单飞策略让"快速切招"变迟钝</td><td>中 / 低</td><td>去抖窗口 300ms 可配置；队列满时 toast 明确告知</td></tr>
+</tbody></table>
+<h3>2.6 里程碑</h3>
+<table><thead><tr><th>里程碑</th><th>日期</th><th>内容</th></tr></thead><tbody>
+<tr><td>M1 P0 链路</td><td>11/06 – 11/13</td><td>1.7-A/B/C/F；每条补单测（目标 ≥55 条）</td></tr>
+<tr><td>M2 拆分与 CI</td><td>11/14 – 11/19</td><td>1.7-D 搬运 + 1.7-E GUI job；三档缩放截图复查</td></tr>
+<tr><td>M3 发布</td><td>11/20 – 11/24</td><td>文档、打包、SHA256、Release v1.7</td></tr>
+</tbody></table>
+<p><strong>Gate G1.7</strong>：取消/串行/残键三项在真机验证通过 + 拆分后全量回归绿 + 单测 ≥55 条。</p>
+<h3>2.7 交付物</h3>
+<p><code>vcct/</code> 包、<code>tests/test_gui_smoke.py</code>、更新后的 CI、Release <code>VC-Cheat-Typer v1.7</code>（exe + SHA256）、<code>docs/ROADMAP-1.7.md</code>（执行时细化）。</p>
+<hr>
+<h2>三、v1.8 — 场景化与可用性</h2>
+<h3>3.1 定位与理由</h3>
+<p>v1.7 之后工具已经"可信"，但<strong>第一次打开仍然要配</strong>：改键、设延迟、试注入，全在密集的两行工具栏里。1.8 把「配置」从主界面搬走，把「场景」自动接上——目标用户是"想玩游戏的人"，不是"愿意读文档的人"。</p>
+<h3>3.2 必做（P0）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>做法</th><th>验收标准</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.8-A</td><td><strong>托盘常驻</strong></td><td>ctypes <code>Shell_NotifyIconW</code> + 隐藏消息窗（复用现有 raw 窗口类）；菜单：显示主界面 / 暂停 / 恢复 / 退出；处理 <code>TaskbarCreated</code> 消息以便 Explorer 重启后自动重注册</td><td>关窗最小化到托盘；托盘右键三项可用；重启 Explorer 后图标自动回来</td><td>1.5d</td></tr>
+<tr><td>1.8-B</td><td><strong>按游戏自动切方案</strong>（承接 1.6 P2-O）</td><td>新增 <code>games: [{name, match_type: exe/title, pattern, profile, enabled}]</code>；复用 3s 轮询，命中规则且<strong>窗口句柄变化</strong>时切方案（防抖 800ms）；发送中不切</td><td>切到 VC 窗口 → 方案自动变「经典版」并在状态栏提示；切回桌面不误切</td><td>1.5d</td></tr>
+<tr><td>1.8-C</td><td><strong>首次启动向导</strong></td><td>3 步：① 选游戏预设（经典版/决定版/自定义）→ ② 试按 F1 验证（用原生窗口探针，不依赖游戏）→ ③ 冲突检测并引导改键。完成后写 <code>settings.onboarded = true</code></td><td>空配置启动必走向导；三步走完热键全绿；可跳过（保留 <code>Ctrl+F1</code> 重新打开）</td><td>1.2d</td></tr>
+<tr><td>1.8-D</td><td><strong>设置收敛到独立对话框</strong></td><td>主界面只留：搜索、暂停、发送、列表、日志；把 关键字/延迟/分组/方案管理/导入导出/统计 全搬进「设置」分页（常规 / 输入 / 游戏 / 数据）</td><td>主界面工具栏一行放得下；设置项与 1.7 完全等价（逐项回归）</td><td>2.0d</td></tr>
+<tr><td>1.8-E</td><td><strong>快捷键总览面板</strong></td><td>一张表列出全部热键（含暂停键）、占用状态、所属方案；支持「导出为文本」；「重新检测占用」主动试注册后立即注销</td><td>冲突项红标；导出文本含方案名与备注</td><td>0.8d</td></tr>
+<tr><td>1.8-F</td><td>文档与截图更新</td><td>README 重写"3 分钟上手"，补托盘/向导/自动切方案说明</td><td>新用户照文档可在 3 分钟内跑通</td><td>0.8d</td></tr>
+</tbody></table>
+<h3>3.3 可选（P1）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.8-G</td><td>键盘全导航</td><td>Tab 顺序、列表 ↑↓ 发送、<code>Esc</code> 关弹窗；无鼠标可用</td><td>0.8d</td></tr>
+<tr><td>1.8-H</td><td>深色主题跟随系统</td><td>读 <code>AppsUseLightTheme</code> 注册表，切换配色表</td><td>0.6d</td></tr>
+<tr><td>1.8-I</td><td>发送历史面板</td><td>最近 50 次（时间/秘籍/方案/耗时/成败），可重发</td><td>0.6d</td></tr>
+</tbody></table>
+<h3>3.4 技术与架构变更</h3>
+<ul><li><code>ui/</code> 从"单窗口 + 弹窗"演进为"主窗口 + 设置 Toplevel + 向导 Toplevel"，<code>theme.py</code> 抽出颜色/字号/间距常量（为 1.8-H 留位）。</li><li>新增后台常驻形态：进程生命周期与窗口生命周期解耦（关闭≠退出）。</li><li><code>games</code> 规则表进配置（v2 兼容，缺省空 → 不切方案，旧行为不变）。</li></ul>
+<h3>3.5 风险</h3>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解</th></tr></thead><tbody>
+<tr><td>R1.8.1</td><td>托盘图标丢失（Explorer 崩溃/重启）</td><td>高 / 中</td><td>监听 <code>TaskbarCreated</code> 重注册；失败则回落"最小化不隐藏"</td></tr>
+<tr><td>R1.8.2</td><td>自动切方案误判（标题含 "Vice City" 的浏览器标签）</td><td>中 / 中</td><td>默认按 <strong>exe 名</strong>匹配，标题匹配需用户显式开启；切换前 800ms 防抖</td></tr>
+<tr><td>R1.8.3</td><td>设置对话框搬运遗漏选项</td><td>中 / 高</td><td>先列"设置项清单"逐项打钩迁移，GUI 冒烟对每项断言读写</td></tr>
+<tr><td>R1.8.4</td><td>关闭即退出的习惯被改变，用户以为没关掉</td><td>中 / 低</td><td>首次最小化时 toast「已最小化到托盘」；设置可改回"关闭即退出"</td></tr>
+</tbody></table>
+<h3>3.6 里程碑</h3>
+<table><thead><tr><th>里程碑</th><th>日期</th><th>内容</th></tr></thead><tbody>
+<tr><td>M1 常驻与场景</td><td>11/25 – 12/04</td><td>1.8-A 托盘、1.8-B 自动切方案</td></tr>
+<tr><td>M2 界面收敛</td><td>12/05 – 12/15</td><td>1.8-C 向导、1.8-D 设置对话框、1.8-E 热键总览</td></tr>
+<tr><td>M3 发布</td><td>12/16 – 12/22</td><td>文档重写、截图、打包、Release v1.8</td></tr>
+</tbody></table>
+<p><strong>Gate G1.8</strong>：向导可在空配置下 3 步跑通 + 自动切方案零误切（3 个常见窗口样本）+ 设置项与 1.7 逐项等价。</p>
+<hr>
+<h2>四、v1.9 — 内容可流通</h2>
+<h3>4.1 定位与理由</h3>
+<p>到 1.8，单个用户的自用体验已经完整。继续加"自己用"的功能收益趋零，但<strong>内容侧</strong>仍是空的：28 条秘籍写死在代码里，用户想加 GTA III / SA 的秘籍只能一条条手工录；别人调好的键位/分组无法分享。1.9 把"秘籍"从程序里的一块常量，变成可导入导出、可批量操作的<strong>数据资产</strong>。</p>
+<h3>4.2 必做（P0）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>做法</th><th>验收标准</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.9-A</td><td><strong>配置升 v3 + 迁移链</strong></td><td><code>version: 3</code>，新增 <code>games</code>、<code>packs</code>（已安装包记录）、<code>ui</code>（窗口位置/列宽）、<code>onboarded</code>；<code>migrate_store(raw)</code> 串行处理 v1→v2→v3；迁移前自动备份 <code>cheats.v2.bak.json</code>；读到<strong>更高版本</strong>时明确提示"配置来自更新版本，请升级程序"而非静默降级</td><td>v1.0/v1.6 配置各一份样本可无损迁移；故意写 v99 有可读提示</td><td>1.5d</td></tr>
+<tr><td>1.9-B</td><td><strong>.vcpack 秘籍包格式</strong></td><td>单 JSON：<code>{format:"vcct-pack", pack_version:1, name, author, game, min_app, cheats[], sha256}</code>；导入前 diff 预览（新增 N / 冲突 M / 覆盖 K）；支持"仅导入选中项"</td><td>导出→改→导入往返一致；冲突项可单独跳过</td><td>2.0d</td></tr>
+<tr><td>1.9-C</td><td><strong>批量编辑</strong></td><td>Treeview 改多选；批量：改分组、分配空闲热键、设发送间隔、删除（入撤销栈）</td><td>选中 5 条 → 批量改组 → 全部生效且热键不重复</td><td>1.5d</td></tr>
+<tr><td>1.9-D</td><td><strong>多游戏模板</strong></td><td>内置模板：VC 经典版（现 28 条）、VC 决定版（参数预设 + 已知差异标注）、GTA III / SA（<strong>仅录入公开秘籍文本，标注"未实机验证"</strong>）；方案与游戏绑定</td><td>切换游戏模板 = 换整套秘籍 + 参数，互不污染</td><td>1.5d</td></tr>
+<tr><td>1.9-E</td><td><strong>文本/CSV 粘贴导入</strong></td><td>解析 <code>名称,代码,热键</code> 或纯代码行；逐行报错（行号 + 原因）；预览后确认</td><td>20 行混合文本 → 正确解析 18 行、报错 2 行且指明行号</td><td>1.0d</td></tr>
+<tr><td>1.9-F</td><td>文档：包格式规范 + 迁移说明</td><td><code>docs/PACK-FORMAT.md</code>、<code>docs/MIGRATION.md</code></td><td>第三方可照文档手写一个合法包</td><td>0.8d</td></tr>
+</tbody></table>
+<h3>4.3 可选（P1）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th><th>估时</th></tr></thead><tbody>
+<tr><td>1.9-G</td><td>包内热键自动避让</td><td>导入时若与本地冲突，自动改到候选空闲键并提示</td><td>0.6d</td></tr>
+<tr><td>1.9-H</td><td>包版本比对</td><td>本地记录包版本，导入同名新版时提示升级（纯本地，不联网）</td><td>0.4d</td></tr>
+<tr><td>1.9-I</td><td>导出为"v2 兼容包"</td><td>给仍用 1.6/1.7 的人留出口</td><td>0.4d</td></tr>
+</tbody></table>
+<h3>4.4 技术与架构变更</h3>
+<ul><li><code>store.py</code> 从"一次性归一化"升级为"版本化迁移链"（<code>migrate_store</code> 纯函数，逐级可测）。</li><li>新增 <code>packs.py</code>（解析/校验/diff/合并），与 <code>store</code> 解耦，便于 2.0 抽库时直接带走。</li><li>秘籍数据结构扩展：<code>game</code>、<code>source_pack</code>（来源包，仅记录不参与逻辑）。</li></ul>
+<h3>4.5 风险</h3>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解</th></tr></thead><tbody>
+<tr><td>R1.9.1</td><td>v3 迁移把老用户配置写坏</td><td>低 / <strong>极高</strong></td><td>迁移前强制备份 + 迁移函数纯化 + 5 份真实历史配置做回归样本；失败自动回滚原文件</td></tr>
+<tr><td>R1.9.2</td><td>包格式过早固化，2.0 要改结构</td><td>中 / 中</td><td><code>pack_version</code> 独立于 app 版本；解析器对未知字段宽容（忽略而非报错）</td></tr>
+<tr><td>R1.9.3</td><td>多游戏模板里的秘籍<strong>未验证</strong>就发布，误导用户</td><td>高 / 中</td><td>模板内每条带 <code>verified: true/false</code>，UI 未验证项灰显标注；README 明确说明</td></tr>
+<tr><td>R1.9.4</td><td>批量操作误删一片</td><td>中 / 高</td><td>批量删除只入一步撤销但保留完整快照；删除前二次确认列出名称</td></tr>
+</tbody></table>
+<h3>4.6 里程碑</h3>
+<table><thead><tr><th>里程碑</th><th>日期</th><th>内容</th></tr></thead><tbody>
+<tr><td>M1 数据层</td><td>12/23 – 01/05</td><td>1.9-A v3 迁移链、1.9-B 包格式</td></tr>
+<tr><td>M2 编辑能力</td><td>01/06 – 01/13</td><td>1.9-C 批量、1.9-D 模板、1.9-E 文本导入</td></tr>
+<tr><td>M3 发布 + 冻结</td><td>01/14 – 01/20</td><td>文档、打包、Release v1.9，<strong>之后进入冻结期</strong></td></tr>
+</tbody></table>
+<p><strong>Gate G1.9</strong>：5 份历史配置迁移零丢失 + 包往返一致 + 冻结期前不再改动数据结构。</p>
+<hr>
+<h2>五、v2.0 — 通用输入平台</h2>
+<h3>5.1 定位与理由</h3>
+<p>1.7–1.9 做完，这个工具在"VC 秘籍输入"这一件事上已经到顶。2.0 的价值不在功能清单，而在<strong>把输入引擎从业务里剥出来</strong>：<code>SendInput + IME 绕行 + 热键总线 + 前台判定</code> 这套东西，任何"给按键类游戏/软件注入文本"的场景都能用（GTA 系列之外、老游戏、模拟器、甚至直播时的固定文本）。 2.0 = <strong>可被复用</strong>，不是"功能更多"。</p>
+<h3>5.2 必做（P0）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>做法</th><th>验收标准</th><th>估时</th></tr></thead><tbody>
+<tr><td>2.0-A</td><td><strong>核心库独立 <code>vcct-core</code></strong></td><td><code>vcct/</code> 拆为 <code>vcct.core</code>（sender/hotkeys/store/profiles/targets）+ <code>vcct.ui</code>（tk 壳）；core 零 tkinter 依赖；<code>pip install -e .</code> 后 <code>import vcct.core</code> 可用</td><td>core 的 import 图中不出现 <code>tkinter</code>；core 单测可在无桌面环境跑</td><td>3.0d</td></tr>
+<tr><td>2.0-B</td><td><strong>发送策略引擎</strong></td><td><code>SendStrategy</code>：间隔策略（固定/自适应/整串）、hold（固定/自适应）、前置延迟、失败补偿（重发次数）；秘籍级可指定，全局可继承</td><td>同一秘籍在三档参数下实测耗时符合预期；自适应能在丢字时自动加长间隔</td><td>2.5d</td></tr>
+<tr><td>2.0-C</td><td><strong>目标应用规则化</strong></td><td><code>Target = {name, match(exe/title/class), require_foreground, ime_policy, strategy_ref, profile_ref}</code>；不再硬编码"游戏"概念</td><td>新增一个目标（如记事本/模拟器）只需改配置，不改代码</td><td>2.0d</td></tr>
+<tr><td>2.0-D</td><td><strong>扩展点（前置/后置钩子）</strong></td><td><code>on_before_send(target, cheat)</code> / <code>on_after_send(result)</code> 回调注册；内置两个示例（切窗口、发送后回切）；默认关闭</td><td>示例钩子可开关，关闭时行为与 1.9 完全一致</td><td>1.5d</td></tr>
+<tr><td>2.0-E</td><td><strong>命令行入口</strong></td><td><code>vcct send &lt;code&gt; --target &lt;name&gt;</code>、<code>vcct list</code>、<code>vcct pack info &lt;file&gt;</code></td><td>从终端一条命令完成注入（供脚本/直播场景）</td><td>1.0d</td></tr>
+<tr><td>2.0-F</td><td><strong>形态与升级出口</strong></td><td>双产物：onefile（便携）+ onedir（启动快）；2.0 首次启动检测旧配置目录并一次性迁移提示；保留 <code>--export-v2</code></td><td>从 1.9 覆盖升级后配置不丢；<code>--export-v2</code> 产物可被 1.9 读取</td><td>1.5d</td></tr>
+<tr><td>2.0-G</td><td><strong>文档站</strong></td><td><code>docs/</code> 生成静态站（自写 md→html 脚本，零依赖）：快速上手 / 兼容性矩阵 / 排障树 / 包格式 / API</td><td>离线可打开、无外链依赖</td><td>1.5d</td></tr>
+<tr><td>2.0-H</td><td>发布与迁移验证</td><td>全量回归 + 真机 + 从 1.6/1.8/1.9 三个版本升级路径各走一遍</td><td>三条升级路径零丢失</td><td>1.0d</td></tr>
+</tbody></table>
+<h3>5.3 可选（P1）</h3>
+<table><thead><tr><th>编号</th><th>功能</th><th>说明</th><th>估时</th></tr></thead><tbody>
+<tr><td>2.0-I</td><td>便携模式配置路径选择</td><td>配置可存 exe 旁 / <code>%APPDATA%</code>，启动参数或首次询问</td><td>0.6d</td></tr>
+<tr><td>2.0-J</td><td>多语言 UI</td><td>仅在中英文两套文案，i18n 表驱动；有真实需求再做</td><td>1.5d</td></tr>
+<tr><td>2.0-K</td><td>更新提示（不自动下载）</td><td>仅打开 Release 页；需联网，默认关闭</td><td>0.5d</td></tr>
+<tr><td>2.0-L</td><td>核心库发布 PyPI</td><td>需长期维护承诺，视是否真有人复用</td><td>0.5d</td></tr>
+</tbody></table>
+<h3>5.4 技术与架构变更</h3>
+<pre><code>vcct/
+├── core/          # 零 GUI 依赖，可独立 pip 安装
+│   ├── winapi.py      SendInput / IME / 前台 / 键态
+│   ├── sender.py      Sender + SendStrategy + 取消/单飞
+│   ├── hotkeys.py     注册总线 + 冲突检测 + 候选键
+│   ├── store.py       v3 schema + 迁移链
+│   ├── packs.py       .vcpack
+│   ├── targets.py     目标规则 + 匹配
+│   └── hooks.py       扩展点
+├── ui/            # tkinter 壳，只依赖 core 公共 API
+└── cli.py</code></pre>
+<p><strong>架构约束（写进 CONTRIBUTING）</strong>：<code>core</code> 不得 import <code>tkinter</code>；<code>ui</code> 不得直接调 <code>SendInput</code>；所有 Win32 调用只出现在 <code>core/winapi.py</code>。</p>
+<h3>5.5 风险</h3>
+<table><thead><tr><th>#</th><th>风险</th><th>概率/影响</th><th>缓解</th></tr></thead><tbody>
+<tr><td>R2.0.1</td><td>抽库演变成"重写"，工期失控</td><td>高 / <strong>高</strong></td><td>先抽接口再加功能；每个 PR 只做一件事；core 抽取期间 UI 行为冻结</td></tr>
+<tr><td>R2.0.2</td><td>策略引擎过度设计（配置项爆炸）</td><td>中 / 中</td><td>只暴露 4 个参数（间隔/hold/前置/重试），其余内置常量</td></tr>
+<tr><td>R2.0.3</td><td>冻结期后节奏断裂，2.0 长期悬空</td><td>中 / 高</td><td>1.9 发布时即锁死 2.0 范围；若 3 月未启动，直接降级为 1.10（只做 2.0-A/B）</td></tr>
+<tr><td>R2.0.4</td><td>配置目录/产物形态变更导致用户丢配置</td><td>低 / <strong>高</strong></td><td>双路径探测 + 一次性迁移 + <code>--export-v2</code> 出口 + 三条升级路径实测</td></tr>
+<tr><td>R2.0.5</td><td>钩子机制被用于联机/作弊场景，带来声誉风险</td><td>中 / 中</td><td>README 与包格式规范明确"单机专用"；不提供内存读写、不提供注入 DLL 能力</td></tr>
+</tbody></table>
+<h3>5.6 里程碑</h3>
+<table><thead><tr><th>里程碑</th><th>日期</th><th>内容</th></tr></thead><tbody>
+<tr><td>冻结期</td><td>01/21 – 03/10</td><td>迁宁波 / 求职 / 站稳；只出 1.9.x 补丁</td></tr>
+<tr><td>M1 抽库</td><td>03/11 – 04/05</td><td>2.0-A core 拆分 + 2.0-C 目标规则</td></tr>
+<tr><td>M2 策略与扩展</td><td>04/06 – 05/05</td><td>2.0-B 策略引擎 + 2.0-D 钩子 + 2.0-E CLI</td></tr>
+<tr><td>M3 形态与发布</td><td>05/06 – 05/31</td><td>2.0-F 双产物/迁移、2.0-G 文档站、2.0-H 三路径验证、Release v2.0</td></tr>
+</tbody></table>
+<p><strong>Gate G2.0</strong>：<code>core</code> 无 tkinter 依赖 + 三条升级路径零丢失 + 1.9 行为在默认配置下逐项一致（回归对照表）。</p>
+<hr>
+<h2>六、迭代关系与升级衔接</h2>
+<h3>6.1 依赖链</h3>
+<pre><code>v1.6 (v2 配置 / 单文件 2900 行)
+  └─ v1.7  模块化 + 发送可靠性        ← 结构底座，后续全部受益
+       └─ v1.8  托盘 / 自动切方案 / 设置页   ← 体验层（依赖 1.7 的 ui/ 分包）
+            └─ v1.9  v3 配置 / 秘籍包 / 多游戏   ← 数据层（依赖 1.8 的 games 概念）
+                 └─ v2.0  core 抽库 / 策略引擎 / 通用目标   ← 平台层（依赖 1.7 包结构 + 1.9 schema）</code></pre>
+<p><strong>硬依赖（前置阻塞）</strong></p>
+<pre><code>1.7-B 单飞 ──&gt; 1.8-B 自动切方案（切换时不能打断发送）
+1.7-D 分包 ──&gt; 1.8-D 设置对话框（UI 大改必须落在独立模块里）
+1.8-B games ──&gt; 1.9-A v3 schema（games 是 v3 的核心字段）
+1.9-A 迁移链 ──&gt; 2.0-F 升级出口（2.0 直接复用迁移链，不新写）
+1.9-B packs ──&gt; 2.0-A core 抽库（packs 必须已与 store 解耦）
+1.7-E GUI CI ──&gt; 1.8-D / 2.0-A（结构性改动的唯一安全网）</code></pre>
+<h3>6.2 配置兼容矩阵</h3>
+<table><thead><tr><th>程序版本</th><th>配置版本</th><th>读 1.6 配置</th><th>降级 / 回退路径</th></tr></thead><tbody>
+<tr><td>v1.7</td><td>v2</td><td>✅ 直接读</td><td>覆盖旧 exe 即可</td></tr>
+<tr><td>v1.8</td><td>v2（+ <code>games</code> 可选字段）</td><td>✅ 直接读</td><td>同上；<code>games</code> 被旧版忽略</td></tr>
+<tr><td>v1.9</td><td><strong>v3</strong>（自动迁移）</td><td>✅ 自动迁移 + 备份</td><td><code>--export-v2</code> 导出兼容包</td></tr>
+<tr><td>v2.0</td><td>v3</td><td>✅ 复用迁移链</td><td><code>--export-v2</code>；保留 1.9 exe 可回退</td></tr>
+</tbody></table>
+<p><strong>三条铁律</strong></p>
+<ol><li><strong>配置只升不降，但必须留出口</strong>：任何升版都自动备份上一版文件，并提供显式导出旧格式的命令。</li><li><strong>新字段一律可选</strong>：缺省 = 旧行为。允许"程序新、配置旧"，不允许"程序旧、配置新"静默降级（提示升级）。</li><li><strong>迁移函数纯化</strong>：<code>migrate_store(raw) -&gt; dict</code> 不碰文件系统，便于用 5 份真实历史配置做回归样本。</li></ol>
+<h3>6.3 发布纪律（每版相同）</h3>
+<ul><li>tag <code>vX.Y</code> → Release 名称 <code>VC-Cheat-Typer vX.Y</code>（不附加描述文字）→ 资产 <code>exe</code> + <code>SHA256.txt</code>。</li><li>Release 说明固定含：「从上一版升级：直接覆盖 exe，配置自动沿用/迁移；回退需保留旧 exe + 备份文件」。</li><li>每版发布前跑：<code>ruff</code> 0 告警、单测全过、<code>--selftest</code> 连跑 3 次、GUI 冒烟、三档缩放截图（100/125/150）。</li><li>1.x 内不做破坏性变更；2.0 允许一次，但必须自动迁移 + 出口 + 三路径实测。</li></ul>
+<hr>
+<h2>七、里程碑总表（日历）</h2>
+<table><thead><tr><th>版本</th><th>开发窗口</th><th>发布日</th><th>人日</th><th>关键 Gate</th></tr></thead><tbody>
+<tr><td>v1.7</td><td>11/06 – 11/24</td><td><strong>2026-11-24（二）</strong></td><td>9.5</td><td>取消/串行/残键真机过 + 拆分后回归绿</td></tr>
+<tr><td>v1.8</td><td>11/25 – 12/22</td><td><strong>2026-12-22（二）</strong></td><td>10.5</td><td>向导 3 步跑通 + 自动切方案零误切</td></tr>
+<tr><td>v1.9</td><td>12/23 – 01/20</td><td><strong>2027-01-20（三）</strong></td><td>10.5</td><td>5 份历史配置迁移零丢失 + 包往返一致</td></tr>
+<tr><td>—</td><td>01/21 – 03/10</td><td>冻结期（只修 bug）</td><td>—</td><td>—</td></tr>
+<tr><td>v2.0</td><td>03/11 – 05/31</td><td><strong>2027-05-31（一）</strong></td><td>17.0</td><td>core 无 tkinter + 三条升级路径零丢失</td></tr>
+</tbody></table>
+<p>合计必做 <strong>47.5 人日</strong>，按 2–3h/天约 <strong>95–120 个自然日</strong>，与上表窗口吻合（含缓冲）。 若 3 月入职后工时降至 1–1.5h/天 → v2.0 顺延至 6 月底，先砍 P1，再砍 2.0-E/F 中的一个。</p>
+<hr>
+<h2>八、必做 / 可选汇总与砍范围顺序</h2>
+<table><thead><tr><th>版本</th><th>必做</th><th>可选</th><th>时间不够时按此顺序砍</th></tr></thead><tbody>
+<tr><td>v1.7</td><td>A–F（6 项）</td><td>G–I（3 项）</td><td>先砍 I、H，再砍 G；<strong>A–D 不可砍</strong></td></tr>
+<tr><td>v1.8</td><td>A–F（6 项）</td><td>G–I（3 项）</td><td>先砍 H、I，再砍 G；<strong>A/B/D 不可砍</strong>，C 可降级为"启动提示"</td></tr>
+<tr><td>v1.9</td><td>A–F（6 项）</td><td>G–I（3 项）</td><td>先砍 H、I，再砍 G；<strong>A/B 不可砍</strong>，D 可只留 VC 两版</td></tr>
+<tr><td>v2.0</td><td>A–H（8 项）</td><td>I–L（4 项）</td><td>全砍 P1；再砍 E（CLI）、G（文档站简化为单个 md）；<strong>A/F/H 不可砍</strong></td></tr>
+</tbody></table>
+<p><strong>跨版本不变量（任何情况下不牺牲）</strong></p>
+<ol><li>零第三方运行时依赖；</li><li>配置不丢（迁移前备份、失败回滚）；</li><li>发布必带 SHA256；</li><li>暂停键在任何状态下都能停掉注入；</li><li>不读写游戏内存、不联网。</li></ol>
+<hr>
+<h2>九、累计明确不做（Out of Scope）</h2>
+<p>沿用 1.6 结论并追加：</p>
+<ul><li>界面框架重写（Qt/PySide/Web UI）——2.0 只是把 core 抽出，不换 UI 工具包；</li><li>内存修改器 / 修改游戏数据 / DLL 注入——法律与反作弊风险，且偏离"输入工具"定位；</li><li>自动更新下载、遥测、云同步、账号体系；</li><li>代码签名证书（成本 &gt; 收益，维持"源码可自建 + SHA256"）；</li><li>联机 / 含反作弊环境支持（README 永久免责声明）；</li><li>宏录制、连招序列、定时循环（2.0 的策略引擎只覆盖"单次输入的质量"，不做自动化脚本）。</li></ul>
+<hr>
+<h2>十、一句话总结</h2>
+<p><strong>1.7 把地基浇筑好（拆包 + 输入可信），1.8 把门面做顺（托盘 + 自动切 + 设置页），1.9 把内容做成资产（包 + 批量 + v3），2.0 把引擎抽出来复用（core + 策略 + 目标规则）。</strong> 每一版都满足"可单独发布、可安全升级、失败可回退"，不存在"必须等到 2.0 才能用"的功能。</p></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>
