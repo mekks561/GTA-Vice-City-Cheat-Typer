@@ -10,6 +10,11 @@ cheats.json
 cheats.json.tmp
 cheats.bak.json
 cheats.corrupt-*.json
+# 1.9 升版前的迁移前原件（同样含用户数据，只留本地）
+cheats.v1.bak.json
+cheats.v2.bak.json
+cheats.v2.json
+*.vcpack
 logs/
 
 # 构建产物
