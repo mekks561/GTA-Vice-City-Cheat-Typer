@@ -48,8 +48,8 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # --- 1.7 兼容层：实现已搬入 vcct/，此处按名导入以保持既有调用与测试不变 ---
 from vcct.const import (  # noqa: F401
-    APP_NAME, APP_VER, C, DEFAULT_SETTINGS, IS_WIN, PAUSE_HID, PAUSE_ID, PRESETS,
-    STORE_APP, STORE_VERSION, WIN_H, WIN_W,
+    APP_NAME, APP_VER, C, DEFAULT_GAME, DEFAULT_SETTINGS, IS_WIN, PAUSE_HID, PAUSE_ID,
+    PRESETS, STORE_APP, STORE_VERSION, WIN_H, WIN_W,
 )
 from vcct.winapi import (  # noqa: F401
     ERROR_ACCESS_DENIED, ERROR_HOTKEY_ALREADY_REGISTERED, GA_ROOT, GWL_EXSTYLE, INPUT,
@@ -69,8 +69,15 @@ from vcct.hotkeys import (  # noqa: F401
 )
 from vcct.store import (  # noqa: F401
     _norm_cheat, _safe_int, bump_stats, bundle_payload, default_cheats, default_store,
-    evaluate_game_rules, filter_cheats, last_load_warning, load_store, normalize_store,
-    parse_bundle, save_store, sorted_cheats, touch_today,
+    evaluate_game_rules, export_v2, filter_cheats, last_load_warning, load_store,
+    migrate_store, normalize_store, parse_bundle, save_store, sorted_cheats, touch_today,
+)
+from vcct.packs import (  # noqa: F401
+    diff_pack, make_pack, merge_pack, pack_record, validate_pack,
+)
+from vcct.importer import parse_pasted  # noqa: F401
+from vcct.templates import (  # noqa: F401
+    TEMPLATE_INFO, TEMPLATE_NAMES, template_cheats, template_preset,
 )
 from vcct.loggingx import (  # noqa: F401
     append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
@@ -339,6 +346,10 @@ class CheatDialog(tk.Toplevel):
             "group": (self.var_group.get() or "自定义").strip(),
             "note": self.var_note.get().strip(),
             "interval_ms": interval,
+            # 1.9：编辑时保留模板 / 来源包 / 验证标记，别把"未实机验证"洗成"已验证"
+            "verified": bool(self.cheat.get("verified", True)),
+            "game": str(self.cheat.get("game") or ""),
+            "source_pack": str(self.cheat.get("source_pack") or ""),
         }
         self.destroy()
 
@@ -917,6 +928,391 @@ class HotkeyOverview(tk.Toplevel):
             messagebox.showerror("导出失败", str(exc), parent=self)
 
 
+# ----------------------------------------------------------------------------
+# 1.9 秘籍包管理（导入 diff 预览 / 导出 .vcpack / 已安装记录）
+# ----------------------------------------------------------------------------
+class PackManagerDialog(tk.Toplevel):
+    def __init__(self, app: "CheatApp"):
+        super().__init__(app.root)
+        self.app = app
+        self.pack: dict | None = None
+        self.diff: list[dict] = []
+        self.title("秘籍包管理（.vcpack）")
+        self.configure(bg=C["bg"])
+        self.transient(app.root)
+        self.geometry(f"{int(720 * app.ui)}x{int(520 * app.ui)}")
+
+        nb = ttk.Notebook(self)
+        nb.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        nb.add(self._page_import(nb), text="  导入包  ")
+        nb.add(self._page_export(nb), text="  导出包  ")
+        nb.add(self._page_installed(nb), text="  已安装  ")
+        ttk.Button(self, text="关闭", command=self.destroy).pack(pady=(2, 10))
+
+    # -- 导入 ---------------------------------------------------------------
+    def _page_import(self, nb):
+        frm = ttk.Frame(nb, padding=14)
+        top = ttk.Frame(frm)
+        top.pack(fill="x")
+        ttk.Button(top, text="选择 .vcpack / .json 文件…", command=self._choose).pack(side="left")
+        self.lbl_file = ttk.Label(top, text="未选择文件", style="Muted.TLabel")
+        self.lbl_file.pack(side="left", padx=(10, 0))
+        self.lbl_warn = tk.Label(frm, text="", bg=C["bg"], fg=C["warn"],
+                                 wraplength=620, justify="left",
+                                 font=("Microsoft YaHei UI", 9), anchor="w")
+        self.lbl_warn.pack(fill="x", pady=(6, 0))
+
+        wrap = tk.Frame(frm, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
+        wrap.pack(fill="both", expand=True, pady=(8, 0))
+        cols = ("pick", "status", "code", "name", "hotkey", "local")
+        self.diff_tree = ttk.Treeview(wrap, columns=cols, show="headings", selectmode="extended")
+        for key, (text, width, anchor) in {
+            "pick": ("勾选", 46, "center"), "status": ("状态", 80, "center"),
+            "code": ("秘籍代码", 170, "w"), "name": ("名称", 130, "w"),
+            "hotkey": ("包内热键", 100, "center"), "local": ("本地热键", 100, "center"),
+        }.items():
+            self.diff_tree.heading(key, text=text)
+            self.diff_tree.column(key, width=width, anchor=anchor)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.diff_tree.yview)
+        self.diff_tree.configure(yscrollcommand=vsb.set)
+        self.diff_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        self.diff_tree.tag_configure("conflict", foreground=C["warn"])
+        self.diff_tree.tag_configure("same", foreground="#98a2b3")
+
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x", pady=(8, 0))
+        ttk.Button(btns, text="全选", width=8, command=lambda: self._select_all()).pack(side="left")
+        ttk.Button(btns, text="仅选新增", width=11, command=lambda: self._select_status("new"))\
+            .pack(side="left", padx=(6, 0))
+        ttk.Button(btns, text="清空选择", width=10,
+                   command=lambda: self.diff_tree.selection_remove(
+                       *self.diff_tree.get_children())).pack(side="left", padx=(6, 0))
+        self.var_overwrite = tk.BooleanVar(value=True)
+        ttk.Checkbutton(btns, text="冲突项覆盖本地", variable=self.var_overwrite)\
+            .pack(side="left", padx=(14, 0))
+        ttk.Button(btns, text="导入所选 →", style="Accent.TButton", command=self._do_import)\
+            .pack(side="right")
+        return frm
+
+    def _choose(self):
+        path = filedialog.askopenfilename(
+            title="选择秘籍包", filetypes=[("秘籍包", "*.vcpack *.json"), ("所有文件", "*.*")],
+            parent=self)
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception as exc:
+            messagebox.showerror("读取失败", str(exc), parent=self)
+            return
+        pack, warns, err = validate_pack(raw, APP_VER)
+        if err:
+            self.pack, self.diff = None, []
+            self.diff_tree.delete(*self.diff_tree.get_children())
+            self.lbl_warn.configure(text=err)
+            return
+        self.pack = pack
+        self.diff = diff_pack(pack, self.app.cheats)
+        self.lbl_file.configure(text=os.path.basename(path))
+        self.lbl_warn.configure(text="；".join(warns) or "校验通过")
+        self._reload_diff()
+        name = pack["name"]
+        added = sum(1 for d in self.diff if d["status"] == "new")
+        conflict = sum(1 for d in self.diff if d["status"] == "conflict")
+        same = sum(1 for d in self.diff if d["status"] == "same")
+        self.lbl_warn.configure(text=(self.lbl_warn.cget("text") +
+                                     f"　｜　包「{name}」：新增 {added} / 冲突 {conflict} / 相同 {same}"))
+        self._select_status("new")
+
+    def _reload_diff(self):
+        self.diff_tree.delete(*self.diff_tree.get_children())
+        labels = {"new": "新增", "conflict": "冲突", "same": "相同"}
+        for d in self.diff:
+            local = (d["existing"] or {}).get("hotkey") or "—"
+            self.diff_tree.insert("", "end", iid=d["code"],
+                                 values=("☐", labels[d["status"]], d["code"], d["name"],
+                                         d["incoming"].get("hotkey") or "—", local),
+                                 tags=(d["status"],) if d["status"] != "new" else ())
+
+    def _select_all(self):
+        self.diff_tree.selection_set(*self.diff_tree.get_children())
+
+    def _select_status(self, status: str):
+        ids = [d["code"] for d in self.diff if d["status"] == status]
+        self.diff_tree.selection_remove(*self.diff_tree.get_children())
+        if ids:
+            self.diff_tree.selection_set(*ids)
+
+    def _do_import(self):
+        if not self.pack:
+            return
+        codes = list(self.diff_tree.selection())
+        if not codes:
+            messagebox.showinfo("未选择", "请在差异表里勾选要导入的条目（行可多选）。", parent=self)
+            return
+        merged, counts = merge_pack(self.app.cheats, self.pack, codes,
+                                    overwrite=bool(self.var_overwrite.get()))
+        self.app.cheats[:] = merged       # 原地替换，保持与 store 内列表的引用
+        packs = self.app.store.setdefault("packs", [])
+        rec = pack_record(self.pack)
+        packs[:] = [p for p in packs if p.get("name") != rec["name"]] + [rec]
+        self.app.persist()
+        self.app.refresh_tree()
+        self.app.apply_hotkeys()
+        self.app.log(f"导入秘籍包「{self.pack['name']}」：新增 {counts['added']} / "
+                     f"覆盖 {counts['updated']} / 跳过 {counts['skipped']}。", "ok")
+        self._load_installed()
+        self.pack, self.diff = None, []
+        self.diff_tree.delete(*self.diff_tree.get_children())
+        self.lbl_warn.configure(text="导入完成，可继续选择下一个包。")
+
+    # -- 导出 ---------------------------------------------------------------
+    def _page_export(self, nb):
+        frm = ttk.Frame(nb, padding=18)
+        ttk.Label(frm, text="把当前方案的秘籍导出成一个可分享的 .vcpack 文件。",
+                  style="Muted.TLabel").pack(anchor="w")
+        box = ttk.LabelFrame(frm, text=" 包信息 ", padding=12)
+        box.pack(fill="x", pady=(14, 0))
+        self.var_name = tk.StringVar(value=f"{self.app.active_profile} · 秘籍包")
+        self.var_author = tk.StringVar(value="")
+        self.var_game = tk.StringVar(value=self._current_game())
+        for i, (label, var) in enumerate((("名称", self.var_name), ("作者", self.var_author),
+                                          ("适用游戏", self.var_game))):
+            ttk.Label(box, text=label).grid(row=i, column=0, sticky="w", pady=5, padx=(0, 12))
+            tk.Entry(box, textvariable=var, width=38).grid(row=i, column=1, sticky="ew", pady=5)
+        ttk.Button(frm, text="导出为 .vcpack…", style="Accent.TButton",
+                   command=self._do_export).pack(anchor="w", pady=(18, 0))
+        ttk.Label(frm, text=f"当前方案「{self.app.active_profile}」共 {len(self.app.cheats)} 条；"
+                            "包内含 sha256 校验，手工修改后仍可导入（会提示校验不符）。",
+                  style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(12, 0))
+        return frm
+
+    def _current_game(self) -> str:
+        prof = next((p for p in self.app.store["profiles"]
+                     if p["name"] == self.app.active_profile), {})
+        return str(prof.get("game") or DEFAULT_GAME)
+
+    def _do_export(self):
+        path = filedialog.asksaveasfilename(
+            title="导出秘籍包", defaultextension=".vcpack", initialfile="cheats.vcpack",
+            filetypes=[("秘籍包", "*.vcpack"), ("JSON", "*.json")], parent=self)
+        if not path:
+            return
+        pack = make_pack(self.var_name.get(), self.app.cheats,
+                         author=self.var_author.get(), game=self.var_game.get())
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(pack, fh, ensure_ascii=False, indent=2)
+            self.app.log(f"已导出秘籍包：{os.path.basename(path)}（{len(pack['cheats'])} 条）", "ok")
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc), parent=self)
+
+    # -- 已安装 -------------------------------------------------------------
+    def _page_installed(self, nb):
+        frm = ttk.Frame(nb, padding=14)
+        self.inst_tree = ttk.Treeview(frm, columns=("name", "author", "game", "ver", "time"),
+                                      show="headings", height=10)
+        for key, (text, width) in {"name": ("包名", 200), "author": ("作者", 110),
+                                   "game": ("游戏", 130), "ver": ("包版本", 70),
+                                   "time": ("导入时间", 150)}.items():
+            self.inst_tree.heading(key, text=text)
+            self.inst_tree.column(key, width=width)
+        self.inst_tree.pack(fill="both", expand=True)
+        ttk.Button(frm, text="移除选中记录", command=self._remove_record).pack(anchor="w", pady=(8, 0))
+        self._load_installed()
+        return frm
+
+    def _load_installed(self):
+        if not hasattr(self, "inst_tree"):
+            return
+        self.inst_tree.delete(*self.inst_tree.get_children())
+        for i, p in enumerate(self.app.store.get("packs") or []):
+            self.inst_tree.insert("", "end", iid=str(i), values=(
+                p["name"], p["author"], p["game"], p["pack_version"], p["imported_at"]))
+
+    def _remove_record(self):
+        sel = self.inst_tree.selection()
+        if not sel:
+            return
+        packs = self.app.store.get("packs") or []
+        for iid in sorted(sel, key=int, reverse=True):
+            if int(iid) < len(packs):
+                packs.pop(int(iid))
+        self.app.persist()
+        self._load_installed()
+
+
+# ----------------------------------------------------------------------------
+# 1.9 文本 / CSV 粘贴导入（预览 + 逐行报错）
+# ----------------------------------------------------------------------------
+class TextImportDialog(tk.Toplevel):
+    def __init__(self, app: "CheatApp"):
+        super().__init__(app.root)
+        self.app = app
+        self.items: list[dict] = []
+        self.title("从文本 / CSV 粘贴导入")
+        self.configure(bg=C["bg"])
+        self.transient(app.root)
+        self.geometry(f"{int(700 * app.ui)}x{int(540 * app.ui)}")
+
+        hint = ("每行一条：代码  |  名称,代码  |  名称,代码,热键  |  名称,代码,热键,备注\n"
+                "（逗号或 Tab 分隔；# 开头为注释；热键需带 Ctrl/Alt/Shift 或 F1–F12）")
+        ttk.Label(self, text=hint, style="Muted.TLabel", justify="left").pack(anchor="w", padx=12, pady=(12, 4))
+        self.txt = tk.Text(self, height=8, font=("Consolas", 10), wrap="none", relief="flat",
+                           bg="#ffffff", highlightthickness=1, highlightbackground=C["line"])
+        self.txt.pack(fill="x", padx=12)
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=12, pady=(6, 0))
+        ttk.Button(bar, text="解析预览", command=self._parse).pack(side="left")
+        self.var_skip = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="跳过与当前方案重复的代码", variable=self.var_skip).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text="导入有效行 →", style="Accent.TButton", command=self._do_import).pack(side="right")
+        self.lbl_result = ttk.Label(bar, text="", style="Muted.TLabel")
+        self.lbl_result.pack(side="right", padx=(0, 12))
+
+        self.tree = ttk.Treeview(self, columns=("line", "code", "name", "hotkey", "msg"),
+                                 show="headings", selectmode="extended")
+        for key, (text, width) in {"line": ("行号", 60), "code": ("代码", 160),
+                                   "name": ("名称", 140), "hotkey": ("热键", 100),
+                                   "msg": ("说明", 300)}.items():
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width)
+        self.tree.tag_configure("error", foreground=C["warn"])
+        self.tree.pack(fill="both", expand=True, padx=12, pady=(8, 6))
+        ttk.Button(self, text="关闭", command=self.destroy).pack(pady=(0, 10))
+
+    def _parse(self):
+        items, errors = parse_pasted(self.txt.get("1.0", "end"))
+        existing = {c["code"].upper() for c in self.app.cheats}
+        self.tree.delete(*self.tree.get_children())
+        self.items = []
+        skipped = 0
+        for i, item in enumerate(items, 1):
+            if self.var_skip.get() and item["code"] in existing:
+                skipped += 1
+                continue
+            self.items.append(item)
+            self.tree.insert("", "end", values=(i, item["code"], item["name"],
+                                                item["hotkey"] or "—", "可导入"))
+        for err in errors:
+            self.tree.insert("", "end", values=(err["line"], "—", err["raw"][:30], "—",
+                                                err["reason"]), tags=("error",))
+        self.lbl_result.configure(text=f"可导入 {len(self.items)} 条 · 跳过重复 {skipped} · 报错 {len(errors)} 行")
+
+    def _do_import(self):
+        if not self.items:
+            messagebox.showinfo("没有可导入的行", "请先粘贴内容并点「解析预览」。", parent=self)
+            return
+        added = 0
+        for item in self.items:
+            if any(c["code"] == item["code"] for c in self.app.cheats):
+                continue
+            self.app.cheats.append(item)
+            added += 1
+        self.app.persist()
+        self.app.refresh_tree()
+        self.app.apply_hotkeys()
+        self.app.log(f"文本导入完成：新增 {added} 条（未验证，默认不绑定或按文本指定热键）。", "ok")
+        messagebox.showinfo("导入完成", f"已导入 {added} 条。\n导入条目默认标注「未实机验证」，"
+                                        "请核对后在列表里绑定热键。", parent=self)
+        self.destroy()
+
+
+# ----------------------------------------------------------------------------
+# 1.9 游戏模板选择
+# ----------------------------------------------------------------------------
+class TemplateDialog(tk.Toplevel):
+    def __init__(self, app: "CheatApp"):
+        super().__init__(app.root)
+        self.app = app
+        self.title("套用游戏模板")
+        self.configure(bg=C["bg"])
+        self.transient(app.root)
+        self.geometry(f"{int(560 * app.ui)}x{int(430 * app.ui)}")
+
+        ttk.Label(self, text="选择一套模板：会替换秘籍表并（若有）套用对应发送参数。",
+                  style="Muted.TLabel").pack(anchor="w", padx=14, pady=(14, 6))
+        row = ttk.Frame(self)
+        row.pack(fill="both", expand=True, padx=14)
+        self.var_choice = tk.StringVar(value=DEFAULT_GAME)
+        self.lst = tk.Listbox(row, font=("Microsoft YaHei UI", 10), exportselection=False)
+        for name in TEMPLATE_NAMES:
+            self.lst.insert("end", name)
+        self.lst.pack(side="left", fill="y")
+        self.lst.selection_set(0)
+        self.lbl_info = tk.Label(row, text="", bg=C["bg"], fg=C["text"], justify="left",
+                                 anchor="nw", wraplength=330, font=("Microsoft YaHei UI", 10))
+        self.lbl_info.pack(side="left", fill="both", expand=True, padx=(12, 0))
+        self.lst.bind("<<ListboxSelect>>", lambda e: self._show_info())
+        self._show_info()
+
+        self.var_new = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self, text="新建方案存放（取消勾选 = 替换当前方案内容，可 Ctrl+Z 之外不可撤销）",
+                        variable=self.var_new).pack(anchor="w", padx=14, pady=(10, 0))
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=14, pady=(8, 12))
+        ttk.Button(btns, text="套用", style="Accent.TButton", command=self._apply).pack(side="right")
+        ttk.Button(btns, text="取消", command=self.destroy).pack(side="right", padx=(0, 8))
+
+    def _choice(self) -> str:
+        sel = self.lst.curselection()
+        return TEMPLATE_NAMES[sel[0]] if sel else DEFAULT_GAME
+
+    def _show_info(self):
+        name = self._choice()
+        info = TEMPLATE_INFO.get(name, {})
+        lines = [name, "", info.get("description", "")]
+        diffs = info.get("differences") or []
+        if diffs:
+            lines += ["", "已知差异 / 提示："] + [f"· {d}" for d in diffs]
+        if not info.get("verified", True):
+            lines += ["", "⚠ 全部条目未实机验证，UI 会灰显并标注；默认不绑定热键。"]
+        lines += ["", f"条目数：{len(template_cheats(name))}（每次套用生成全新 id）"]
+        self.lbl_info.configure(text="\n".join(lines))
+
+    def _apply(self):
+        app = self.app
+        name = self._choice()
+        cheats = template_cheats(name)
+        preset = template_preset(name)
+        if not cheats:
+            return
+        if not info_verified(name) and not messagebox.askyesno(
+                "未验证模板",
+                f"「{name}」的秘籍均为公开文本、未在本工具实机验证。\n"
+                "仍要套用吗？（会灰显标注，默认不绑定热键）", parent=self):
+            return
+        if self.var_new.get():
+            base = name.replace("（未验证）", "")
+            new_name, i = base, 2
+            while any(p["name"] == new_name for p in app.store["profiles"]):
+                new_name, i = f"{base} ({i})", i + 1
+            app.store["profiles"].append({"name": new_name, "cheats": cheats, "game": name})
+            app.var_profile.set(new_name)
+            app.switch_profile()
+            app._refresh_profile_choices()
+        else:
+            prof = next((p for p in app.store["profiles"] if p["name"] == app.active_profile), None)
+            if prof is not None:
+                prof["game"] = name
+            app.cheats[:] = cheats
+        if preset:
+            app.settings.update(preset)
+            app.var_delay.set(int(preset["char_interval_ms"]))
+        app.persist()
+        app.refresh_tree()
+        app.apply_hotkeys()
+        app.log(f"已套用游戏模板「{name}」（{len(cheats)} 条"
+                + (f"，参数 {preset['char_interval_ms']}ms" if preset else "") + "）。", "ok")
+        self.destroy()
+
+
+def info_verified(name: str) -> bool:
+    return bool(TEMPLATE_INFO.get(name, {}).get("verified", True))
+
+
 class CheatApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -1130,6 +1526,11 @@ class CheatApp:
         more.add_command(label="快捷键总览", command=self.open_hotkey_overview)
         more.add_command(label="首次启动向导（Ctrl+F1）", command=self.open_wizard)
         more.add_separator()
+        more.add_command(label="秘籍包管理（.vcpack）…", command=self.open_pack_manager)
+        more.add_command(label="从文本/CSV 粘贴导入…", command=self.open_text_import)
+        more.add_command(label="套用游戏模板…", command=self.open_template_dialog)
+        more.add_command(label="导出 v2 兼容配置…", command=self.export_v2_compat)
+        more.add_separator()
         more.add_command(label="导出整包（设置 + 全部方案 + 统计）", command=self.export_bundle)
         more.add_command(label="导入整包…", command=self.import_bundle)
         more.add_command(label="从上一版备份恢复", command=self.restore_backup)
@@ -1147,7 +1548,7 @@ class CheatApp:
         list_wrap.pack(fill="both", expand=True)
 
         cols = ("idx", "name", "code", "hotkey", "state", "count", "last", "note")
-        self.tree = ttk.Treeview(list_wrap, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(list_wrap, columns=cols, show="headings", selectmode="extended")
         headings = {"idx": ("#", 36, "center"), "name": ("名称", 148, "w"),
                     "code": ("秘籍代码", 190, "w"), "hotkey": ("快捷键", 114, "center"),
                     "state": ("状态", 56, "center"), "count": ("次数", 48, "center"),
@@ -1167,6 +1568,7 @@ class CheatApp:
         self.tree.tag_configure("odd", background="#fbfcfe")
         self.tree.tag_configure("conflict", foreground=C["warn"])
         self.tree.tag_configure("unbound", foreground="#98a2b3")
+        self.tree.tag_configure("unverified", foreground="#94a3b8")  # 1.9 未实机验证
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
         self.tree.bind("<Return>", lambda e: self.send_selected())
         self.tree.bind("<Button-3>", self._popup_row_menu)
@@ -1177,6 +1579,13 @@ class CheatApp:
         self.menu_row.add_command(label="自动分配全部冲突项", command=self.auto_fix_conflicts)
         self.menu_row.add_separator()
         self.menu_row.add_command(label="复制秘籍代码", command=self.copy_code)
+        # 1.9-C 批量操作（列表已是 extended 多选）
+        self.menu_batch = tk.Menu(self.menu_row, tearoff=0)
+        self.menu_batch.add_command(label="批量改分组…", command=self.batch_set_group)
+        self.menu_batch.add_command(label="批量分配空闲热键", command=self.batch_assign_hotkeys)
+        self.menu_batch.add_command(label="批量设置发送间隔…", command=self.batch_set_interval)
+        self.menu_batch.add_command(label="批量删除…", command=self.batch_delete)
+        self.menu_row.add_cascade(label="批量操作（选中多条时可用）", menu=self.menu_batch)
 
         # 操作区
         ops = ttk.Frame(outer)
@@ -1530,15 +1939,20 @@ class CheatApp:
             elif not c.get("hotkey"):
                 state = "未绑定"
                 tags.append("unbound")
+            if not c.get("verified", True):       # 1.9-D 未实机验证模板
+                tags.append("unverified")
             entry = self.stats.get(c["code"], {})
             used = entry.get("count", 0)
             last = str(entry.get("last") or "")
             if len(last) >= 16:
                 last = last[5:]          # 去掉年份，保持列窄
+            note = str(c.get("note") or "")
+            if not c.get("verified", True):
+                note = "⚠ 未实机验证 · " + note
             self.tree.insert("", "end", iid=c["id"], tags=tags,
                              values=(i, c.get("name", ""), c.get("code", ""),
                                      c.get("hotkey") or "—", state, used or "—",
-                                     last or "—", c.get("note", "")))
+                                     last or "—", note))
         if sel and self.tree.exists(sel):
             self.tree.selection_set(sel)
             self.tree.see(sel)
@@ -1575,6 +1989,8 @@ class CheatApp:
             extra = f"　⚠ {self.conflicts[c['id']]}"
         speed = c.get("interval_ms") or 0
         speed_text = f"　·　单条间隔 {speed}ms" if speed else ""
+        if not c.get("verified", True):
+            speed_text += "　·　⚠ 未实机验证"
         self.lbl_hint.configure(text=f"{c['name']}　→　{c['code']}　·　快捷键 {hk}{speed_text}{extra}")
 
     def by_id(self, cid: str):
@@ -1583,6 +1999,10 @@ class CheatApp:
     def selected_id(self):
         sel = self.tree.selection()
         return sel[0] if sel else None
+
+    def selected_ids(self) -> list[str]:
+        """1.9-C：多选批量操作用；返回当前选中的秘籍 id 列表。"""
+        return list(self.tree.selection())
 
     # -- 热键注册 ------------------------------------------------------------
     def apply_hotkeys(self):
@@ -1658,9 +2078,14 @@ class CheatApp:
     # -- 冲突处置 -----------------------------------------------------------
     def _popup_row_menu(self, event):
         row = self.tree.identify_row(event.y)
-        if row:
+        # 1.9-C：右键已选中的行时保留多选，别把批量选择打回单行
+        if row and row not in self.tree.selection():
             self.tree.selection_set(row)
         try:
+            n = len(self.selected_ids())
+            self.menu_row.entryconfigure(self.menu_row.index("end"),
+                                         label=f"批量操作（已选 {n} 条）" if n > 1
+                                         else "批量操作（选中多条时可用）")
             self.menu_row.tk_popup(event.x_root, event.y_root)
         finally:
             self.menu_row.grab_release()
@@ -2001,7 +2426,22 @@ class CheatApp:
             self.log("没有可撤销的操作（只保留最近一次删除）。", "info")
             return
         self._undo = None
-        if u["kind"] == "cheat":
+        if u["kind"] == "batch_cheats":
+            # 1.9-C：恢复整份方案快照（批量删除一步全回来）
+            prof = next((p for p in self.store["profiles"] if p["name"] == u["profile"]), None)
+            if prof is None:
+                self.log("撤销失败：原方案已不存在。", "warn")
+                return
+            prof["cheats"][:] = u["snapshot"]
+            self.active_profile = prof["name"]
+            self.cheats = prof["cheats"]
+            self.var_profile.set(self.active_profile)
+            self._refresh_profile_choices()
+            self.persist()
+            self.refresh_tree()
+            self.apply_hotkeys()
+            self.log(f"已撤销批量删除：方案「{prof['name']}」恢复 {len(u['snapshot'])} 条。", "ok")
+        elif u["kind"] == "cheat":
             prof = next((p for p in self.store["profiles"] if p["name"] == u["profile"]), None)
             if prof is None:
                 self.log("撤销失败：原方案已不存在。", "warn")
@@ -2051,7 +2491,7 @@ class CheatApp:
                                    "将用内置的 28 条常用秘籍替换当前方案，自定义内容会丢失。继续？",
                                    parent=self.root):
             return
-        fresh = default_cheats()
+        fresh = template_cheats(DEFAULT_GAME)   # 1.9：带上 verified / game 字段
         self.cheats[:] = fresh  # 原地替换，保持与 store 内列表的引用关系
         self.persist()
         self.refresh_tree()
@@ -2094,7 +2534,9 @@ class CheatApp:
             messagebox.showwarning("名称重复", "已有同名方案。", parent=self.root)
             return
         copy = [dict(c) for c in self.cheats]
-        self.store["profiles"].append({"name": name, "cheats": copy})
+        current = next((p for p in self.store["profiles"] if p["name"] == self.active_profile), {})
+        self.store["profiles"].append({"name": name, "cheats": copy,
+                                       "game": current.get("game") or DEFAULT_GAME})
         self.persist()
         self.var_profile.set(name)
         self.switch_profile()
@@ -2421,12 +2863,118 @@ class CheatApp:
         except Exception as exc:
             self.log(f"热键总览打开失败：{exc}", "warn")
 
+    # -- 1.9 内容侧 -----------------------------------------------------------
+    def open_pack_manager(self):
+        PackManagerDialog(self)
+
+    def open_text_import(self):
+        TextImportDialog(self)
+
+    def open_template_dialog(self):
+        TemplateDialog(self)
+
+    def export_v2_compat(self):
+        """显式导出 v2 兼容配置（不覆盖当前 v3 文件，供旧版程序 / 回退使用）。"""
+        path = filedialog.asksaveasfilename(
+            title="导出 v2 兼容配置", defaultextension=".json", initialfile="cheats.v2.json",
+            filetypes=[("JSON", "*.json")], parent=self.root)
+        if not path:
+            return
+        try:
+            export_v2(self.store, path)
+            self.log(f"已导出 v2 兼容配置：{path}（1.6/1.7/1.8 可直接读取，v3 新字段已剥离）", "ok")
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc), parent=self.root)
+
+    # -- 1.9-C 批量操作（多选） ------------------------------------------------
+    def _batch_targets(self) -> list[dict]:
+        ids = self.selected_ids()
+        return [c for c in self.cheats if c["id"] in ids]
+
+    def batch_set_group(self):
+        targets = self._batch_targets()
+        if not targets:
+            self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
+            return
+        group = simpledialog.askstring("批量改分组",
+                                       f"把选中的 {len(targets)} 条设为分组：\n"
+                                       "（武器/生存/通缉/载具/改装/交通/天气/市民/自定义，可自填）",
+                                       initialvalue=targets[0].get("group") or "自定义",
+                                       parent=self.root)
+        if not group or not group.strip():
+            return
+        group = group.strip()
+        for c in targets:
+            c["group"] = group
+        self.persist()
+        self.refresh_tree()
+        self.log(f"批量分组：{len(targets)} 条 → 「{group}」。", "ok")
+
+    def batch_assign_hotkeys(self):
+        ids = [c["id"] for c in self._batch_targets()]
+        if not ids:
+            self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
+            return
+        changed = self._assign_free_combos(ids, 0)
+        self.log(f"批量分配空闲热键：{len(changed)} 条已更新（其余键无需改动）。", "ok")
+
+    def batch_set_interval(self):
+        targets = self._batch_targets()
+        if not targets:
+            self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
+            return
+        value = simpledialog.askinteger("批量发送间隔",
+                                        f"给选中的 {len(targets)} 条设置每字间隔 (ms)：\n"
+                                        "0 = 跟随全局；范围 0–300",
+                                        initialvalue=int(targets[0].get("interval_ms") or 0),
+                                        minvalue=0, maxvalue=300, parent=self.root)
+        if value is None:
+            return
+        for c in targets:
+            c["interval_ms"] = int(value)
+        self.persist()
+        self.refresh_tree()
+        self.log(f"批量间隔：{len(targets)} 条 → {value}ms。", "ok")
+
+    def batch_delete(self):
+        targets = self._batch_targets()
+        if not targets:
+            self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
+            return
+        names = [c["name"] for c in targets]
+        preview = "\n".join(f"· {n}" for n in names[:10])
+        if len(names) > 10:
+            preview += f"\n· … 另有 {len(names) - 10} 条"
+        if not messagebox.askyesno("批量删除",
+                                   f"确定删除选中的 {len(targets)} 条秘籍？\n\n{preview}\n\n"
+                                   "可点「撤销」一次性恢复（保留完整快照）。", parent=self.root):
+            return
+        # 完整快照而非逐条记录：批量删除必须一步全恢复
+        self._undo = {"kind": "batch_cheats", "profile": self.active_profile,
+                      "snapshot": [dict(c) for c in self.cheats]}
+        ids = {c["id"] for c in targets}
+        self.cheats[:] = [c for c in self.cheats if c["id"] not in ids]
+        self.persist()
+        self.refresh_tree()
+        self.apply_hotkeys()
+        self.log(f"批量删除 {len(targets)} 条（可点「撤销」恢复整个方案）。", "warn")
+
     def on_close(self, force: bool = False):
         """关窗：1.8 起默认最小化到托盘；force=True（托盘退出/提权重启）才真正退出。"""
         if not force and self.settings.get("close_to_tray", True) and self.tray.available:
             self.root.withdraw()
             self._tray_hint_once()
             return
+        # 取消所有待执行的 after（事件泵 / 向导 / 轮询）：窗口销毁后它们再触发
+        # 只会刷出一堆 "invalid command name" 的 Tcl 错误
+        try:
+            for aid in self.root.tk.call("after", "info"):
+                try:
+                    self.root.after_cancel(aid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # 先停发送：不能让线程在窗口销毁后还往系统里注入按键
         self._stop.set()
         if self.sending.locked():
@@ -2551,9 +3099,26 @@ def selftest() -> int:
     only_car = filter_cheats(default_cheats(), "载具", "panzer")
     print(f"    分组+搜索叠加（载具/panzer）命中 {len(only_car)} 条")
     ok &= len(only_car) == 1 and only_car[0]["code"] == "PANZER"
-    grp = filter_cheats(default_cheats(), "武器", "")
-    print(f"    分组「武器」筛选 {len(grp)} 条")
-    ok &= len(grp) >= 1
+    hits = filter_cheats(default_cheats(), "武器", "")
+    print(f"    分组「武器」筛选 {len(hits)} 条")
+    ok &= len(hits) >= 1
+
+    print("[2e] 1.9 数据层：v1→v3 迁移 / 秘籍包 / 文本导入 / 模板")
+    legacy = {"version": 1, "settings": {"char_interval_ms": 80},
+              "cheats": [{"code": "ASPIRINE", "name": "满血"}]}
+    v3 = migrate_store(legacy)
+    print(f"    迁移链: v1 → v{v3['version']}，条目 {len(v3['profiles'][0]['cheats'])}")
+    ok &= v3["version"] == STORE_VERSION and v3["settings"]["char_interval_ms"] == 80
+    pack = make_pack("自检包", default_cheats()[:2])
+    checked, _warns, err = validate_pack(pack, APP_VER)
+    diff = diff_pack(pack, default_cheats())
+    print(f"    秘籍包: 校验={'通过' if checked and not err else err}，diff {len(diff)} 条")
+    ok &= bool(checked) and not err and len(diff) == 2
+    parsed_items, parsed_errs = parse_pasted("满血,ASPIRINE,F4\n坏行!\n")
+    print(f"    文本导入: 有效 {len(parsed_items)} 条 / 报错 {len(parsed_errs)} 行（行号 {[e['line'] for e in parsed_errs]}）")
+    ok &= len(parsed_items) == 1 and len(parsed_errs) == 1 and parsed_errs[0]["line"] == 2
+    print(f"    游戏模板: {len(TEMPLATE_NAMES)} 套 / VC 经典版 {len(template_cheats('VC 经典版'))} 条")
+    ok &= len(TEMPLATE_NAMES) == 4 and len(template_cheats("VC 经典版")) == 28
 
     print("[3] 前台窗口探测：", foreground_info())
 
@@ -2680,6 +3245,19 @@ def main() -> int:
         return diagnose()
     if "--selftest" in sys.argv:
         return selftest()
+    if "--export-v2" in sys.argv:
+        # 1.9：给仍用 1.6/1.7/1.8 的人留下显式降级出口（不覆盖当前 v3 配置）
+        idx = sys.argv.index("--export-v2")
+        out = (sys.argv[idx + 1] if len(sys.argv) > idx + 1
+               and not sys.argv[idx + 1].startswith("--")
+               else os.path.join(os.path.dirname(data_path()), "cheats.v2.json"))
+        try:
+            export_v2(load_store(), out)
+            print(f"已导出 v2 兼容配置：{out}")
+            return 0
+        except Exception as exc:
+            print(f"导出失败：{exc}")
+            return 1
 
     install_crash_hooks()   # 之后任何未捕获异常都会落盘到 logs/app.log
     append_log(f"===== 进程启动 pid={os.getpid()} =====")

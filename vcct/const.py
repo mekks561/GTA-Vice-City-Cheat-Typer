@@ -5,15 +5,16 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "1.8.0"
+APP_VER = "1.9.0"
 IS_WIN = os.name == "nt"
 
 
 # ----------------------------------------------------------------------------
-# 数据（v2：多方案组 + 使用统计；自动迁移 v1 单列表格式）
+# 数据（v3：v2 + packs / ui / 方案游戏绑定；自动迁移 v1 → v2 → v3）
 # ----------------------------------------------------------------------------
-STORE_VERSION = 2
+STORE_VERSION = 3
 STORE_APP = "vc-cheat-typer"
+DEFAULT_GAME = "VC 经典版"      # 1.9-D：方案默认绑定的游戏模板
 
 DEFAULT_SETTINGS = {
     "char_interval_ms": 45,   # 每字总间隔

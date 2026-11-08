@@ -56,6 +56,30 @@ class TestGuiSmoke(unittest.TestCase):
                 pass
             app_module.load_store, app_module.save_store = old_load, old_save
 
+    def test_1_9_dialogs_build(self):
+        """1.9 三个新对话框能建起来（布局参数错误会在这里当场炸）。"""
+        old_load, old_save = app_module.load_store, app_module.save_store
+        app_module.load_store = lambda path=None: default_store()
+        app_module.save_store = lambda *a, **k: None
+        root = None
+        try:
+            root = tk.Tk()
+            app = app_module.CheatApp(root)
+            root.update()
+            for cls in (app_module.PackManagerDialog, app_module.TextImportDialog,
+                        app_module.TemplateDialog, app_module.SettingsDialog):
+                dlg = cls(app) if cls is not app_module.SettingsDialog else cls(root, app)
+                root.update()
+                dlg.destroy()
+            app.on_close(force=True)
+        finally:
+            try:
+                if root is not None:
+                    root.destroy()
+            except Exception:
+                pass
+            app_module.load_store, app_module.save_store = old_load, old_save
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
