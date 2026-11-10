@@ -139,7 +139,9 @@ def shell(title: str, nav: str, body: str) -> str:
 
 def main() -> int:
     os.makedirs(SITE, exist_ok=True)
-    sources = [("README.md", "首页 / README")]
+    sources = [("README.md", "首页 / README"),
+               ("README.en.md", "English README"),
+               ("CONTRIBUTING.md", "CONTRIBUTING")]
     for name in sorted(os.listdir(DOCS)):
         if name.endswith(".md"):
             sources.append((f"docs/{name}", name[:-3]))

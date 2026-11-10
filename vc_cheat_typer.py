@@ -91,6 +91,13 @@ from vcct.core.hooks import HookBus  # noqa: F401
 from vcct.loggingx import (  # noqa: F401
     append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
 )
+from vcct.i18n import (  # noqa: F401
+    LOCALES, apply_locale_to_widgets, get_locale, set_locale, t,
+)
+from vcct.paths import (  # noqa: F401
+    copy_config_to, data_root, describe as describe_paths, other_mode,
+    read_data_mode, set_data_mode,
+)
 from vcct.sender import SendCancelled, SendError, SendParams, type_text
 from vcct.tray import TrayIcon
 
@@ -503,7 +510,31 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(box2, text="环境诊断", command=self.app.run_diagnose).pack(side="left")
         ttk.Button(box2, text="以管理员身份重启", command=self.app.relaunch_as_admin)\
             .pack(side="left", padx=(8, 0))
+
+        # 2.1 界面语言 / 更新入口
+        box3 = ttk.LabelFrame(frm, text=" 界面与更新 ", padding=12)
+        box3.pack(fill="x", pady=(14, 0))
+        lrow = ttk.Frame(box3)
+        lrow.pack(fill="x")
+        ttk.Label(lrow, text="界面语言（重启后生效）").pack(side="left")
+        self.var_locale = tk.StringVar(value="English" if get_locale() == "en" else "中文")
+        cbo = ttk.Combobox(lrow, textvariable=self.var_locale, state="readonly",
+                           values=["中文", "English"], width=12)
+        cbo.pack(side="left", padx=(8, 0))
+        cbo.bind("<<ComboboxSelected>>", self._change_locale)
+        ttk.Button(lrow, text="立即重启", command=self.app.relaunch).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(box3, text="显示更新入口（仅打开 Release 页，程序不联网、不自动下载；重启后生效）",
+                        variable=self.app.var_updates,
+                        command=self.app._on_setting_change).pack(anchor="w", pady=(8, 0))
         return frm
+
+    def _change_locale(self, *_):
+        code = "en" if self.var_locale.get() == "English" else "zh"
+        self.app.settings["locale"] = code
+        self.app.persist()
+        messagebox.showinfo("语言已保存",
+                            "界面语言将在下次启动生效。\n可点「立即重启」马上切换。"
+                            "\n\n日志、诊断报告与异常文本仍保留中文（便于排查）。", parent=self)
 
     def _capture_pause(self):
         HotkeyCapture(self, self.var_pause.get(), self._set_pause)
@@ -708,7 +739,50 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(box3, text="打开日志目录", command=app.open_log).pack(side="left")
         ttk.Button(box3, text="发送历史", command=app.open_history).pack(side="left", padx=(8, 0))
         ttk.Button(box3, text="恢复默认秘籍表", command=app.reset_defaults).pack(side="left", padx=(8, 0))
+
+        # 2.1-A 数据目录（便携 / 用户目录）
+        pbox = ttk.LabelFrame(frm, text=" 数据目录 ", padding=12)
+        pbox.pack(fill="x", pady=(14, 0))
+        self.lbl_paths = ttk.Label(pbox, text="", style="Muted.TLabel", justify="left",
+                                    wraplength=560)
+        self.lbl_paths.pack(anchor="w")
+        prow = ttk.Frame(pbox)
+        prow.pack(fill="x", pady=(8, 0))
+        self.btn_switch_path = ttk.Button(prow, text="切换目录", command=self._switch_data_mode)
+        self.btn_switch_path.pack(side="left")
+        ttk.Button(prow, text="复制配置到另一目录", command=self._copy_config).pack(side="left", padx=(8, 0))
+        ttk.Button(prow, text="立即重启", command=app.relaunch).pack(side="left", padx=(8, 0))
+        self._reload_paths_info()
         return frm
+
+    def _reload_paths_info(self):
+        d = describe_paths()
+        label = "便携（exe 旁）" if d["mode"] == "portable" else "用户目录（%LOCALAPPDATA%）"
+        self.lbl_paths.configure(
+            text=f"当前：{label}　·　数据目录 {d['root']}\n"
+                 f"模式文件：{d['mode_file']}"
+                 + ("" if d["mode_persisted"] else "（只读，本次设置仅当前进程有效）")
+                 + "\n切换只影响下次启动，不会自动搬运或删除任何配置文件。")
+        other = "用户目录" if d["mode"] == "portable" else "exe 旁"
+        self.btn_switch_path.configure(text=f"切换到{other}")
+
+    def _switch_data_mode(self):
+        target = other_mode()
+        set_data_mode(target)
+        self._reload_paths_info()
+        messagebox.showinfo("已记录切换",
+                            f"下次启动将使用{'用户目录' if target == 'user' else 'exe 旁'}的数据目录。\n\n"
+                            "当前配置仍留在原处，不会被删除。若想把配置也带过去，"
+                            "点「复制配置到另一目录」，再点「立即重启」。", parent=self)
+
+    def _copy_config(self):
+        target = other_mode()
+        ok, detail = copy_config_to(target)
+        if ok:
+            self.app.log(f"已把配置复制到另一数据目录：{detail}（原文件保留）", "ok")
+            messagebox.showinfo("复制完成", f"已复制到：{detail}\n\n原配置保持不变。", parent=self)
+        else:
+            messagebox.showwarning("未复制", detail, parent=self)
 
 
 # ----------------------------------------------------------------------------
@@ -770,7 +844,7 @@ class OnboardWizard(tk.Toplevel):
             .pack(side="right", padx=(0, 10))
 
     def _page_preset(self):
-        self.lbl_title.configure(text="第 1 步 / 3：选一套发送参数")
+        self.lbl_title.configure(text=t("第 1 步 / 3：选一套发送参数"))
         tk.Label(self.body, text="经典版适配 GTA VC 原版（30fps 帧轮询，默认推荐）；\n"
                                  "决定版（Unreal 引擎）输入窗口更宽，整体放慢一档。\n"
                                  "之后可在 设置 → 输入 随时改。",
@@ -788,7 +862,7 @@ class OnboardWizard(tk.Toplevel):
         self._nav(next_text="下一步 →", next_cmd=lambda: self._show(1))
 
     def _page_verify(self):
-        self.lbl_title.configure(text="第 2 步 / 3：验证按键能送达")
+        self.lbl_title.configure(text=t("第 2 步 / 3：验证按键能送达"))
         app = self.app
         hk = next((c["hotkey"] for c in app.cheats if c["hotkey"]), "（未绑定）")
         tk.Label(self.body, text=f"当前方案「{app.active_profile}」的第一个热键是 {hk}。\n\n"
@@ -811,7 +885,7 @@ class OnboardWizard(tk.Toplevel):
                   next_text="下一步 →", next_cmd=lambda: self._show(2))
 
     def _run_probe(self):
-        self.lbl_probe.configure(text="自检中…")
+        self.lbl_probe.configure(text=t("自检中…"))
         app = self.app
 
         def worker():
@@ -830,14 +904,14 @@ class OnboardWizard(tk.Toplevel):
 
     def _show_probe_result(self):
         if self.probe_ok:
-            self.lbl_probe.configure(text="✔ 注入链路正常", foreground=C["ok"])
+            self.lbl_probe.configure(text=t("✔ 注入链路正常"), foreground=C["ok"])
         else:
             self.lbl_probe.configure(
                 text="✖ 未能收到字符（不影响试用，可点「⋯ 更多 → 环境诊断」定位）",
                 foreground=C["warn"])
 
     def _page_conflicts(self):
-        self.lbl_title.configure(text="第 3 步 / 3：快捷键冲突检查")
+        self.lbl_title.configure(text=t("第 3 步 / 3：快捷键冲突检查"))
         conflicts = {k: v for k, v in self.app.conflicts.items()}
         if conflicts:
             names = []
@@ -1166,7 +1240,7 @@ class PackManagerDialog(tk.Toplevel):
         self._load_installed()
         self.pack, self.diff = None, []
         self.diff_tree.delete(*self.diff_tree.get_children())
-        self.lbl_warn.configure(text="导入完成，可继续选择下一个包。")
+        self.lbl_warn.configure(text=t("导入完成，可继续选择下一个包。"))
 
     # -- 导出 ---------------------------------------------------------------
     def _page_export(self, nb):
@@ -1412,11 +1486,16 @@ class TemplateDialog(tk.Toplevel):
 
 
 def bind_dialog_keys(win: tk.Toplevel, on_escape=None):
-    """1.8-G：Toplevel 统一 Esc 关闭（主窗口 Esc = 停发送/清搜索 的语义不变）。
+    """1.8-G：Toplevel 统一 Esc 关闭；2.1：顺带在控件建成后套用界面语言。
 
     Tab 顺序沿用控件创建顺序；列表 ↑↓ / Enter 发送由 Treeview 与既有绑定负责。
     """
     win.bind("<Escape>", lambda e: (on_escape() if on_escape else win.destroy()))
+    try:
+        win.title(t(win.title()))
+        win.after_idle(lambda: apply_locale_to_widgets(win))
+    except Exception:
+        pass
 
 
 # ----------------------------------------------------------------------------
@@ -1537,6 +1616,7 @@ class CheatApp:
         self._tray_hinted = False        # 首次最小化到托盘的提示只给一次
         self._active_target: dict | None = None   # 2.0 当前命中的目标规则解析结果
         self.hooks = HookBus(enabled=False)      # 2.0 扩展点，默认关闭
+        set_locale(self.settings.get("locale", "zh"))   # 2.1 界面语言（默认中文）
         self._make_vars()
         self.hooks.enabled = bool(self.settings.get("hooks_enabled", False))
 
@@ -1591,6 +1671,7 @@ class CheatApp:
         self.var_tray = tk.BooleanVar(value=bool(s.get("close_to_tray", True)))
         self.var_auto_switch = tk.BooleanVar(value=bool(s.get("auto_switch", True)))
         self.var_hooks = tk.BooleanVar(value=bool(s.get("hooks_enabled", False)))
+        self.var_updates = tk.BooleanVar(value=bool(s.get("check_updates", False)))
 
     def _on_unmap(self, _event=None):
         """用户点了任务栏/标题栏的「最小化」→ 收进托盘（withdraw 不触发本回调二次入托）。"""
@@ -1735,7 +1816,10 @@ class CheatApp:
         more.add_command(label="以管理员身份重启", command=self.relaunch_as_admin)
         more.add_separator()
         more.add_command(label="清空使用统计", command=self.clear_stats)
+        if self.settings.get("check_updates", False):
+            more.add_command(label="检查更新…", command=self.check_updates)
         mb.configure(menu=more)
+        self.menu_more = more         # 2.1：语言切换要能改菜单文案
 
         # 列表
         list_wrap = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
@@ -1819,6 +1903,10 @@ class CheatApp:
         self.root.bind("<Control-f>", lambda e: self._focus_search())
         self.root.bind("<Control-z>", lambda e: self.undo_last())
         self.root.bind("<Escape>", lambda e: self._on_escape())
+
+        # 2.1：UI 建成后统一套用语言（纯后处理，不改控件结构 / Tab 顺序）
+        apply_locale_to_widgets(self.root, menus=(self.menu_row, self.menu_batch,
+                                                   self.menu_more))
 
     def _select_edge(self, which: int):
         """1.8-G：Home / End 跳到列表首尾（↑↓ 选中、Enter 发送沿用既有行为）。"""
@@ -1922,7 +2010,7 @@ class CheatApp:
                 self.lbl_game.configure(text=f"🟢 游戏运行中：{exe or '未知进程'}", foreground=C["ok"])
                 self._show_admin_button(False)
             else:
-                self.lbl_game.configure(text="⚪ 未检测到游戏", foreground=C["muted"])
+                self.lbl_game.configure(text=t("⚪ 未检测到游戏"), foreground=C["muted"])
                 self._show_admin_button(False)
         except Exception:
             pass
@@ -2034,6 +2122,22 @@ class CheatApp:
                 self.btn_admin.pack_forget()
         except Exception:
             pass
+
+    def relaunch(self):
+        """2.1：普通重启（切换数据目录 / 界面语言后让新设置生效）。"""
+        import subprocess
+        try:
+            if getattr(sys, "frozen", False):
+                base = [sys.executable]
+            else:
+                base = [sys.executable, os.path.abspath(sys.argv[0])]
+            args = base + [a for a in sys.argv[1:] if not a.startswith("--")]
+            subprocess.Popen(args, close_fds=True)
+            append_log("已请求普通重启（语言 / 数据目录切换生效）")
+            self.on_close(force=True)
+        except Exception as exc:
+            self.log(f"重启失败：{exc}（请手工关闭后重新打开）", "warn")
+            messagebox.showwarning("重启失败", str(exc), parent=self.root)
 
     def relaunch_as_admin(self):
         """以管理员身份重启自身（会弹 UAC）。"""
@@ -2205,7 +2309,7 @@ class CheatApp:
             text = f"匹配 {shown} / 共 {len(self.cheats)} 条"
         else:
             text = f"共 {shown} 条"
-        self.lbl_count.configure(text=f"{text} · 今日 {self.today_count()} 次")
+        self.lbl_count.configure(text=t(f"{text} · 今日 {self.today_count()} 次"))
 
     def today_count(self) -> int:
         t = self.store.get("today") or {}
@@ -2251,7 +2355,8 @@ class CheatApp:
             self.cheats, self.settings.get("pause_hotkey", ""), include_cheats=not self.paused)
         self.conflicts.update(conflicts)
         self.engine.apply(bindings)
-        self.lbl_state.configure(text="已暂停 · 仅暂停键生效…" if self.paused else "注册快捷键…")
+        self.lbl_state.configure(text=t("已暂停 · 仅暂停键生效…" if self.paused
+                                        else "注册快捷键…"))
 
     def _on_hotkeys_applied(self, results: dict, id_map: dict):
         self.hotkey_owner = id_map
@@ -2289,10 +2394,10 @@ class CheatApp:
             self.log(f"暂停键不可用：{self.conflicts[PAUSE_ID]}。"
                      f"请换一个组合（如 Ctrl+Alt+Shift+P）。", "warn")
         if self.paused:
-            self.lbl_state.configure(text=f"⏸ 已暂停（{pause_combo} 恢复）")
+            self.lbl_state.configure(text=t(f"⏸ 已暂停（{pause_combo} 恢复）"))
         elif cheat_conflicts:
             msg = f"⚠ {len(cheat_conflicts)} 个快捷键不可用（{ok_count} 个生效）"
-            self.lbl_state.configure(text=msg)
+            self.lbl_state.configure(text=t(msg))
             for cid, reason in cheat_conflicts.items():
                 c = self.by_id(cid)
                 self.log(f"快捷键冲突：{c['name'] if c else cid} — {reason}", "warn")
@@ -2302,7 +2407,7 @@ class CheatApp:
             if denied:
                 self.log("提示：权限不足 → 请右键本工具以管理员身份运行一次。", "warn")
         else:
-            self.lbl_state.configure(text=f"✔ {ok_count} 个快捷键全部生效")
+            self.lbl_state.configure(text=t(f"✔ {ok_count} 个快捷键全部生效"))
             self.log(f"快捷键注册完成，共 {ok_count} 个生效。", "ok")
 
         # 自动分配后仍有键被系统占着 → 换下一批候选键，最多 2 轮（避免死循环）
@@ -2405,9 +2510,9 @@ class CheatApp:
 
     def _update_pause_ui(self):
         if self.paused:
-            self.btn_pause.configure(text="▶ 恢复热键", style="Danger.TButton")
+            self.btn_pause.configure(text=t("▶ 恢复热键"), style="Danger.TButton")
         else:
-            self.btn_pause.configure(text="⏸ 暂停热键", style="TButton")
+            self.btn_pause.configure(text=t("⏸ 暂停热键"), style="TButton")
         try:
             self.tray.update_tip(self.paused)   # 托盘悬停文字同步暂停态
         except Exception:
@@ -2493,9 +2598,9 @@ class CheatApp:
     def _set_sending_ui(self, active: bool):
         try:
             if active:
-                self.btn_send.configure(text="■ 停止 (Esc)", style="Danger.TButton")
+                self.btn_send.configure(text=t("■ 停止 (Esc)"), style="Danger.TButton")
             else:
-                self.btn_send.configure(text="▶ 发送所选 (Enter)", style="Accent.TButton")
+                self.btn_send.configure(text=t("▶ 发送所选 (Enter)"), style="Accent.TButton")
         except Exception:
             pass
 
@@ -2997,6 +3102,7 @@ class CheatApp:
         self.settings["close_to_tray"] = bool(self.var_tray.get())
         self.settings["auto_switch"] = bool(self.var_auto_switch.get())
         self.settings["hooks_enabled"] = bool(self.var_hooks.get())
+        self.settings["check_updates"] = bool(self.var_updates.get())
         self.hooks.enabled = self.settings["hooks_enabled"]
         try:
             self.settings["char_interval_ms"] = int(self.var_delay.get())
@@ -3162,6 +3268,20 @@ class CheatApp:
             HotkeyOverview(self)
         except Exception as exc:
             self.log(f"热键总览打开失败：{exc}", "warn")
+
+    def check_updates(self):
+        """2.0-K：只把 Release 页交给系统浏览器打开。
+
+        程序本身**不发起任何网络请求**、不下载、不解析版本；入口默认关闭。
+        """
+        url = "https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/releases"
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            self.log(f"已请求打开 Release 页（本程序不联网）：{url}", "info")
+        except Exception as exc:
+            self.log(f"打开浏览器失败：{exc}", "warn")
+            messagebox.showinfo("Release 页", url, parent=self.root)
 
     def open_history(self):
         try:
@@ -3470,6 +3590,22 @@ def selftest() -> int:
     print(f"    钩子: 默认关闭时 fire_before={bus.fire_before({}, {})}（应为 True）")
     ok &= bus.fire_before({}, {}) is True
 
+    print("[2h] 2.1 数据目录 / 多语言 / 打包元数据")
+    p = describe_paths()
+    print(f"    数据目录模式 {p['mode']} · 配置 {os.path.basename(p['config'])}"
+          f" · 模式文件 {os.path.basename(p['mode_file'])}")
+    ok &= p["mode"] in ("portable", "user") and p["config"].endswith("cheats.json")
+    zh = t("添加")
+    set_locale("en")
+    en = t("添加")
+    set_locale("zh")
+    print(f"    i18n: 添加 → {zh} / {en}")
+    ok &= zh == "添加" and en == "Add" and get_locale() == "zh"
+    print(f"    设置项: locale={DEFAULT_SETTINGS.get('locale')} "
+          f"check_updates={DEFAULT_SETTINGS.get('check_updates')}")
+    ok &= (DEFAULT_SETTINGS.get("locale") == "zh"
+           and DEFAULT_SETTINGS.get("check_updates") is False)
+
     print("[3] 前台窗口探测：", foreground_info())
 
     # 真实注入测试：隐藏原生 Win32 窗口验证"扫描码→VK→WM_CHAR"全链路
@@ -3546,6 +3682,8 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
         add("系统", "未知")
     add("本工具", f"管理员={self_elevated()}　pid={os.getpid()}")
     add("配置", data_path())
+    add("数据模式", f"{read_data_mode()}（模式文件 {describe_paths()['mode_file']}）")
+    add("界面语言", get_locale())
     add("日志", log_file())
 
     hwnd, title, exe = find_game_window()
@@ -3613,6 +3751,11 @@ def main() -> int:
     if not IS_WIN:
         print("本工具仅支持 Windows。")
         return 1
+    # 2.1-A：全局数据目录开关必须在任何配置/日志访问之前处理
+    if "--userdata" in sys.argv:
+        set_data_mode("user")
+    elif "--portable" in sys.argv:
+        set_data_mode("portable")
     if "--diagnose" in sys.argv:
         return diagnose()
     if "--selftest" in sys.argv:

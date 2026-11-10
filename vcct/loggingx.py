@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""1.7 日志与崩溃钩子；2.0 起实现层零 tkinter（弹窗由 UI 层注入）。"""
+"""1.7 日志与崩溃钩子；2.0 起实现层零 tkinter；2.1 起数据目录由 paths.py 统一决定。"""
 from __future__ import annotations
 
 import os
@@ -9,16 +9,7 @@ import time
 import traceback
 
 from .const import APP_NAME
-
-def app_dir() -> str:
-    """程序所在目录：打包后是 exe 所在目录，源码运行时是项目根目录（vcct/ 的上一级）。"""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def data_path() -> str:
-    return os.path.join(app_dir(), "cheats.json")
+from .paths import app_dir, data_path, data_root, read_data_mode  # noqa: F401
 
 
 def backup_path(path: str | None = None) -> str:
@@ -37,23 +28,20 @@ _crash_dialog_open = False
 
 
 def _writable(path: str) -> bool:
+    """只建目录 + 检查权限，不创建/删除探针文件（避免受管环境的回收站钩子误伤）。"""
     try:
         os.makedirs(path, exist_ok=True)
-        probe = os.path.join(path, ".write-test")
-        with open(probe, "w", encoding="utf-8") as fh:
-            fh.write("ok")
-        os.remove(probe)
-        return True
-    except Exception:
+        return os.access(path, os.W_OK)
+    except OSError:
         return False
 
 
 def log_dir() -> str:
-    """优先 exe 同目录 logs/；不可写（如装在 Program Files）则退到 %LOCALAPPDATA%。"""
+    """跟随数据模式：portable 用 exe 旁 logs/，user 用用户目录 logs/；不可写则退到 %LOCALAPPDATA%。"""
     global _log_dir_cache
     if _log_dir_cache:
         return _log_dir_cache
-    preferred = os.path.join(app_dir(), "logs")
+    preferred = os.path.join(data_root(), "logs")
     if _writable(preferred):
         _log_dir_cache = preferred
         return preferred

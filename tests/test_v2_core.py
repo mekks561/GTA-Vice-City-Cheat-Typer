@@ -14,6 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vcct.core as core  # noqa: E402
+from vcct.const import APP_VER  # noqa: E402
 from vcct.core.hooks import HookBus, make_log_hook  # noqa: E402
 from vcct.core.strategy import (  # noqa: E402
     describe_plan, normalize_strategies, normalize_strategy, plan_send,
@@ -269,7 +270,7 @@ class TestCli(unittest.TestCase):
     def test_version_and_dry_run(self):
         rc, out = self._run(["version"])
         self.assertEqual(rc, 0)
-        self.assertIn("v2.0.0", out)
+        self.assertIn("v" + APP_VER, out)
         rc, out = self._run(["send", "ASPIRINE"])   # 预演，不碰键盘
         self.assertEqual(rc, 0)
         self.assertIn("预演模式", out)

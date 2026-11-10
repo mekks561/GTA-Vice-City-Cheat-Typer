@@ -93,6 +93,22 @@ try {
     Write-Host "    SHA256 $hash" -ForegroundColor Green
     Write-Host "    $shaPath" -ForegroundColor Green
 
+    # 2.1-D：控制台 CLI（GUI 子系统 exe 在交互控制台看不到 stdout）
+    Write-Host "[4/4] console CLI..." -ForegroundColor Gray
+    $cliExe = Join-Path $distDir "VC-Cheat-Typer-cli.exe"
+    if (Test-Path -LiteralPath $cliExe) {
+        Move-Item -LiteralPath $cliExe -Destination (Join-Path $distDir (
+            "VC-Cheat-Typer-cli.exe.previous-" + (Get-Date -Format "yyyyMMdd-HHmmss"))) -Force
+    }
+    & $Python -m PyInstaller VC-Cheat-Typer-cli.spec --noconfirm
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller (CLI) failed" }
+    if (-not (Test-Path -LiteralPath $cliExe)) { throw "CLI output missing" }
+    $cliHash = (Get-FileHash -LiteralPath $cliExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    $cliShaPath = Join-Path $distDir "VC-Cheat-Typer-cli-SHA256.txt"
+    [IO.File]::WriteAllText($cliShaPath, "$cliHash *VC-Cheat-Typer-cli.exe`n",
+                            (New-Object Text.UTF8Encoding($false)))
+    Write-Host "OK  VC-Cheat-Typer-cli.exe  SHA256 $cliHash" -ForegroundColor Green
+
     if ($OneDir) {
         Write-Host "[4/4] onedir distribution (2.0-F)..." -ForegroundColor Gray
         & $Python -m PyInstaller VC-Cheat-Typer-onedir.spec --noconfirm

@@ -4,6 +4,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .venv/
+*.egg-info/
 
 # 用户本地配置（含个人使用统计，不随仓库分发）
 cheats.json
@@ -21,9 +22,12 @@ logs/
 build/
 dist/
 *.spec
-# 但两个发布用的 spec 必须随仓库分发
+# 但三个发布用的 spec 必须随仓库分发
 !VC-Cheat-Typer.spec
 !VC-Cheat-Typer-onedir.spec
+!VC-Cheat-Typer-cli.spec
+# 2.1 数据模式标记是运行时用户数据（不进仓库）
+path-mode.txt
 
 # 临时文件
 _scratch_*

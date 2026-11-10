@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "2.0.0"
+APP_VER = "2.1.0"
 IS_WIN = os.name == "nt"
 
 
@@ -34,6 +34,9 @@ DEFAULT_SETTINGS = {
     "onboarded": False,       # 首次启动向导是否已完成/跳过
     # --- 2.0 新增（可选，缺省 = 旧行为） ---
     "hooks_enabled": False,   # 扩展点（前置/后置钩子）总开关，默认关闭
+    # --- 2.1 新增（可选，缺省 = 旧行为） ---
+    "locale": "zh",           # 界面语言 zh/en；默认中文
+    "check_updates": False,   # 菜单显示「检查更新」入口，默认关闭
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢
