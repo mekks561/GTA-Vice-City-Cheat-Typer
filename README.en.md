@@ -48,6 +48,10 @@ If nothing happens: check the red privilege warning → make sure the game windo
 - **Send history** (v1.9.1): last 50 sends (time / cheat / profile / result / duration), replayable; **keyboard navigation** with ↑/↓, Home/End, Enter to send, Esc to close dialogs
 - **Generic input platform** (v2.0): `vcct.core` public API with zero tkinter dependency, configurable `Target` rules (exe/title/class → profile/strategy/IME/foreground), send strategies (`fixed` default / `burst` / `adaptive` with retry), optional before/after hooks (off by default), and a CLI. Script: `python -m vcct.cli send ASPIRINE --target VC` (dry-run; add `--execute` to inject)
 - **Two distributions** (v2.0): onefile portable exe + onedir zip (`build.ps1 -OneDir`); offline docs site at `docs/site/index.html`
+- **Data folder choice** (v2.1): `--portable` (default, next to exe) or `--userdata` (`%LOCALAPPDATA%\VC-Cheat-Typer`); switching affects the next launch only, config copy is explicit and never overwrites
+- **Bilingual UI** (v2.1): switch Chinese/English in Settings; logs and diagnostics stay Chinese on purpose
+- **Offline update entry** (v2.1): optional menu item that only opens the Release page in a browser; the app makes no network requests
+- **Installable core** (v2.1): `pip install -e . --no-build-isolation` then `import vcct.core` (verified on a Python without tkinter); `vcct` console script; `CONTRIBUTING.md` documents the hard architecture rules
 - **v3 config with migration chain** (v1.9): v1/v2 configs auto-migrate with a permanent pre-upgrade backup; `--export-v2` writes a config readable by v1.6–v1.8. See [`docs/MIGRATION.md`](docs/MIGRATION.md)
 - **Safety**: cancellable sends (Esc / Stop button), modifier keys always released, debounce, send-quality logging, config backups, crash logs
 

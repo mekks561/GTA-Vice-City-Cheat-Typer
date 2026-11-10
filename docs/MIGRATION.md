@@ -42,7 +42,13 @@ v3  { version:3, settings, active_profile, profiles[].{name,cheats,game},
 | `strategies` | v2.0 具名发送策略表 | `{}` |
 
 `games` 是 1.8 引入的 v2 可选字段，v3 原样保留；`targets` 非空时优先于 `games`。
-`settings.hooks_enabled` 默认 `False`（扩展点关闭）。
+`settings.hooks_enabled`（2.0）、`settings.locale`（2.1，默认 `zh`）、
+`settings.check_updates`（2.1，默认 `False`）默认都关闭 / 取旧行为。
+
+> **2.1 数据目录**：模式不写进 `cheats.json`，而在 exe 旁的 `path-mode.txt`
+> （便携 / 用户目录二选一）。切换只影响下次启动，不自动搬运配置；
+> `--portable` / `--userdata` 可临时覆盖。这样不产生"读配置前先得知道配置在哪"的循环，
+> 也不违反"配置只升不降"。
 
 > v1.9.1 **不升配置版本**：`history` 是 v3 可选字段，缺省空列表；`to_v2()` 会剥离它，因此 `--export-v2` 产物仍可被 1.6/1.7/1.8 读取。旧程序读到 v1.9.1 配置时同样安全忽略 `history`。
 

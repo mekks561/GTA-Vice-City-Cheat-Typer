@@ -46,6 +46,41 @@
 - 包管理增强（1.9.1）：导入时自动避让热键冲突、同名包版本/内容变化提示
 - 一键构建（1.9.1）：`build.ps1` 自动跑单测 + ruff + PyInstaller + 生成 SHA256 清单
 - 通用输入平台（2.0）：`vcct.core` 零 tkinter 公共 API、目标规则、发送策略引擎、扩展点、CLI、双产物、离线文档站
+- 数据目录可选（2.1）：`--portable`（默认）/ `--userdata`，切换只影响下次启动，配置搬运需显式复制且不覆盖
+- 中英双语 UI（2.1）：设置 → 常规 切换，重启生效；日志/诊断仍保留中文便于排查
+- 离线更新入口（2.1）：只打开 Release 页，程序不发任何网络请求，默认关闭
+- 可独立安装（2.1）：`pip install -e .` + `vcct` 命令；`CONTRIBUTING.md` 写明架构硬约束
+- 控制台 CLI 产物（2.1）：`VC-Cheat-Typer-cli.exe`，交互控制台可见输出
+
+## v2.1 更新内容（收尾 P1 + 兑现工程承诺）
+
+> 增量版本：**配置仍 v3、包格式不变、默认行为与 v2.0 逐项一致**。路线图规划到 v2.0 为止，本版把剩余 P1 可选项与 v2.0 未落地的工程化补齐。
+
+| 编号 | 功能 | 说明 |
+|---|---|---|
+| **2.0-I** | 便携 / 用户数据目录 | `vcct/paths.py` 统一管理：默认 `portable`（exe 旁），`--userdata` 切到 `%LOCALAPPDATA%\VC-Cheat-Typer`。模式写在 exe 旁独立的 `path-mode.txt`（不污染 `cheats.json`、不产生"读配置前要先知道配置在哪"的循环）。设置 → 数据 显示当前目录 / 模式文件，提供「切换目录」「复制配置到另一目录」「立即重启」；**切换不自动搬运、复制不覆盖、原文件永不删除** |
+| **2.0-J** | 中英双语 UI | `vcct/i18n.py` 表驱动（中文原文为 key，未收录保持中文）。覆盖主界面控件、更多菜单、右键菜单、设置页与主要弹窗、Treeview 表头；切换写 `settings.locale`，重启生效并可一键重启。**日志、诊断报告、异常文本与长帮助句保留中文**（译文会掩盖排查线索），这是有意设计 |
+| **2.0-K** | 离线更新入口 | 「⋯ 更多 → 检查更新…」在设置里开启后出现；点击只调用 `webbrowser.open` 打开 Release 页，**程序不发起任何网络请求、不下载、不解析版本**。AST 测试禁止 urllib/requests/socket |
+| **2.0-L** | 核心库可独立安装 | `pyproject.toml` 补 `[build-system]` / `[project.scripts] vcct` / `packages`（此前版本号还停在 1.5.0 且缺 build-system，Release 里写的 `pip install -e .` 实际不成立）。已在**无 tkinter 的 Python 3.13** 实测：`pip install -e . --no-build-isolation` 成功、`import vcct.core` 不加载 tkinter、`vcct version` 可用。新增 `CONTRIBUTING.md` 落实路线图 5.4 要求的架构硬约束 |
+| **2.1-D** | 控制台 CLI 产物 | GUI 子系统（`console=False`）exe 在交互控制台看不到 stdout，新增 `VC-Cheat-Typer-cli.exe`（`console=True`）+ 独立 SHA256；`cli_entry.py` 为入口。源码模式继续用 `python -m vcct.cli` |
+
+**启动参数**：`--portable` / `--userdata` 可与 `--diagnose` / `--selftest` / `--cli` / `--export-v2` 组合；模式标记只影响数据目录，不改任何发送行为。
+
+**CLI 三种用法**：
+
+```bat
+VC-Cheat-Typer-cli.exe list
+VC-Cheat-Typer.exe --cli list
+python -m vcct.cli --help
+```
+
+**本版修掉的真问题**
+
+| 问题 | 影响 | 修复 |
+|---|---|---|
+| 托盘固定窗口类名 `VCCT_TrayWnd` + 大部分 Win32 函数缺 64 位签名 | 同进程创建第二个托盘实例时命中 1410 后复用旧类（窗口过程回调已被回收），且句柄被 ctypes 默认的 32 位 int 截断 → **Windows access violation**，完整测试套件曾直接崩到 `rc=127` | 每次用唯一类名、退出时销毁窗口并 `UnregisterClassW`；补齐 `RegisterClassW` / `CreateWindowExW` / `GetModuleHandleW` / `Shell_NotifyIconW` / 菜单与消息循环等全部签名；`close()` 短等线程 id 避免留下不自退循环。`-X faulthandler` 实测 208 条测试 **0 次 access violation** |
+| `pyproject.toml` 版本号停在 `1.5.0` 且无 `[build-system]` | v2.0 Release 里写的 `pip install -e .` 实际装不上（缺 `bdist_wheel`），core 无法独立复用 | 重写元数据、对齐 `APP_VER`、加 `vcct` 命令与包清单；在无 tkinter 的 Python 3.13 实测安装成功 |
+| GUI 子系统 exe 在交互控制台看不到 stdout | `--cli` 输出对用户不可见 | 新增 `console=True` 的 `VC-Cheat-Typer-cli.exe` 独立产物 |
 
 ## v2.0 更新内容（通用输入平台）
 
@@ -329,18 +364,22 @@ vc-cheats/
 ├── vc_cheat_typer.py  主程序入口（GUI + 自检 + 诊断；逻辑在 vcct/）
 ├── vcct/              核心模块（const/winapi/hotkeys/store/sender/loggingx/tray/packs/importer/templates）
 ├── vcct/core/         2.0 通用输入平台（门面 + targets/strategy/hooks，零 tkinter）
+├── vcct/paths.py      2.1 数据目录（portable / userdata）
+├── vcct/i18n.py       2.1 中英表驱动文案
 ├── vcct/cli.py        2.0 命令行入口
+├── cli_entry.py       2.1 控制台 CLI 产物入口
 ├── run.bat            启动器（找 pythonw 后台运行）
 ├── build.ps1          一键构建（单测 + ruff + PyInstaller + SHA256）
 ├── README.md          本文件（中文完整文档）
 ├── README.en.md       英文说明（面向国际访客）
+├── CONTRIBUTING.md    架构硬约束与开发流程
 ├── cheats.json        你的方案组 + 设置 + 统计（v3，自动生成）
 ├── cheats.bak.json    上一版配置自动备份（每次保存时生成）
 ├── cheats.v2.bak.json 升 v3 前的迁移前原件（永久保留，不覆盖）
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
 ├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
 ├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
-├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md  各版执行方案
+├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md / PLAN-2.1.md  各版执行方案
 ├── docs/PACK-FORMAT.md   .vcpack 秘籍包格式规范
 ├── docs/MIGRATION.md    配置迁移 / 备份 / 回退说明
 ├── docs/site/           离线文档站（tools/build_docs.py 生成）

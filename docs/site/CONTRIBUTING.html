@@ -1,0 +1,70 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CONTRIBUTING</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>CONTRIBUTING — 架构约束与开发流程</h1>
+<blockquote>路线图 5.4 要求把架构约束写进 CONTRIBUTING。本文是<strong>硬约束</strong>，PR 违反即打回。</blockquote>
+<h2>1. 分层</h2>
+<pre><code>vcct/
+├── core/          # 零 GUI 依赖、可独立安装（import vcct.core）
+│   ├── __init__.py   公共 API 门面（惰性导出平台相关模块）
+│   ├── targets.py    目标应用规则（纯逻辑）
+│   ├── strategy.py   发送策略（纯逻辑）
+│   └── hooks.py      扩展点（纯逻辑）
+├── const.py / winapi.py / hotkeys.py / sender.py / store.py / packs.py
+├── loggingx.py / templates.py / importer.py / paths.py / i18n.py
+├── tray.py / cli.py
+└── vc_cheat_typer.py（仓库根，UI 壳）</code></pre>
+<p><strong>兼容式抽库</strong>：2.0 起 <code>vcct/core/</code> 是门面与新能力模块，既有平铺模块仍是实现层。 不要为了"目录看着整齐"把 <code>vcct/*.py</code> 搬进 <code>core/</code> —— 那会同时打断 1.7～1.9 的 import、PyInstaller spec 与 CLI（路线图风险 R2.0.1）。</p>
+<h2>2. 三条不可违反的边界</h2>
+<ol><li><strong><code>core</code> 不得 <code>import tkinter</code></strong>（包括函数内延迟导入）。<code>import vcct.core</code></li></ol>
+<p>在无桌面 / 非 Windows 环境也必须成功；平台相关模块用 PEP 562 惰性导出。</p>
+<ol><li><strong><code>core</code> 新模块不得直接调用 Win32</strong>（不得 <code>import ctypes</code> / <code>windll</code> / <code>winapi</code>）。</li></ol>
+<p>平台能力一律通过注入函数传入（见 <code>hooks.make_switch_window_hook</code>）。</p>
+<ol><li><strong>UI 不得直接调 <code>SendInput</code></strong>：一律走 <code>vcct.sender.type_text</code> + 注入的</li></ol>
+<p><code>send_key</code> / <code>lookup_vk</code>；所有 Win32 调用集中在 <code>winapi.py</code>。</p>
+<p><code>tests/test_v2_core.py::TestCoreBoundary</code> 用 AST 守住前两条，CI 每次跑。</p>
+<h2>3. 跨版本不变量（任何情况下不牺牲）</h2>
+<ul><li>零第三方<strong>运行时</strong>依赖；</li><li>配置不丢（迁移前备份、失败可回滚、更高版本配置禁止回写）；</li><li>发布必带 SHA256；</li><li>暂停键在任何状态下都能停掉注入（发送睡眠切片 ≤20ms）；</li><li>不读写游戏内存、<strong>不联网</strong>、不支持联机 / 反作弊环境。</li></ul>
+<p>新增字段一律可选：缺省 = 旧行为。允许"程序新 + 配置旧"，不允许"程序旧 + 配置新" 静默降级。配置版本目前 v3，迁移链在 <code>vcct/store.py::migrate_store</code>（纯函数、不碰磁盘）。</p>
+<h2>4. 本地开发</h2>
+<pre><code>:: 运行时零依赖，直接跑
+run.bat
+python vc_cheat_typer.py --selftest
+python vc_cheat_typer.py --diagnose
+python vc_cheat_typer.py --cli list
+
+:: 把 core 作为可编辑包安装（离线环境用 --no-build-isolation 避免下载；
+:: 该模式要求本机已有 setuptools&gt;=61 与 wheel）
+python -m pip install -e . --no-build-isolation
+python -m vcct.cli version
+:: 已在无 tkinter 的 Python 3.13 上实测：import vcct.core 不会加载 tkinter
+
+:: 开发期工具
+python -m unittest discover -s tests
+python -m ruff check vc_cheat_typer.py vcct/ tools/</code></pre>
+<p>数据目录：<code>--portable</code>（默认，exe 旁）/ <code>--userdata</code>（<code>%LOCALAPPDATA%\VC-Cheat-Typer</code>）。 模式写在 exe 旁 <code>path-mode.txt</code>，切换只影响下次启动；配置搬运必须显式复制且不覆盖。</p>
+<h2>5. 构建与发布</h2>
+<pre><code>powershell -ExecutionPolicy Bypass -File build.ps1 -OneDir
+python tools/build_docs.py</code></pre>
+<p><code>build.ps1</code> 依次跑单测 + ruff + PyInstaller（onefile / onedir / console CLI）， 生成各自的 SHA256 清单。发布纪律见 <code>docs/ROADMAP-1.7-2.0.md</code> §6.3： tag <code>vX.Y</code> → Release 名称 <code>VC-Cheat-Typer vX.Y</code> → 资产 exe + SHA256.txt， 说明里固定写清"覆盖升级 / 回退需保留旧 exe + 备份"。</p>
+<h2>6. PR 规则</h2>
+<ul><li>一个 PR 只做一件事；结构性改动必须同时补单测与 GUI 冒烟覆盖。</li><li>新增设置项进 <code>DEFAULT_SETTINGS</code> 白名单，并给 <code>to_v2()</code> 的剥离语义写测试。</li><li>新增对话框调用 <code>bind_dialog_keys(...)</code>（统一 Esc 关闭 + 语言后处理）。</li><li>新增界面文案往 <code>vcct/i18n.py::EN_TEXT</code> 加映射；日志 / 诊断 / 异常文本保持中文。</li><li>不引入任何运行时第三方依赖；不新增网络请求（更新入口只允许 <code>webbrowser.open</code>）。</li></ul>
+<h2>7. 明确不做（Out of Scope）</h2>
+<p>界面框架重写（Qt / Web UI）、内存修改器 / DLL 注入、自动更新下载、遥测 / 云同步 / 账号体系、代码签名、联机支持、宏录制 / 连招序列 / 定时循环。理由见路线图 §9。</p></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PLAN-2.1</title><style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1f29;--muted:#6b7280;--line:#e3e7ee;--accent:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+font:15px/1.7 "Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:18px 0;margin-bottom:24px}
+header .wrap{padding:0 24px}header h1{margin:0;font-size:20px}
+nav a{display:inline-block;margin:8px 12px 0 0;color:var(--accent);text-decoration:none;font-size:14px}
+nav a:hover{text-decoration:underline}
+article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px 34px}
+h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em}h1{font-size:26px}h2{font-size:21px;
+border-bottom:1px solid var(--line);padding-bottom:6px}h3{font-size:17px}
+pre{background:#0f172a;color:#cbd5e1;padding:14px 16px;border-radius:8px;overflow:auto;font:13px/1.6 Consolas,monospace}
+code{background:#eef2f7;padding:2px 5px;border-radius:4px;font:13px Consolas,monospace}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
+margin:14px 0;padding:8px 16px;color:#374151}
+ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>v2.1 执行方案（P1 收尾，已完成）</h1>
+<blockquote>基线：v2.0（tag <code>v2.0</code>，commit <code>c07c539</code>） 路线图 <code>docs/ROADMAP-1.7-2.0.md</code> 只规划到 v2.0，本版 = 剩余的 P1 可选项（2.0-I~L） + 兑现 v2.0 未落地的工程承诺。</blockquote>
+<h2>关键假设</h2>
+<ol><li><strong>版本定位</strong>：v2.0 已把全部必做做完，v2.1 不开新架构层、不升配置版本（仍 v3）、</li></ol>
+<p>不改包格式、不改任何默认行为；只做「补齐 + 修复」。</p>
+<ol><li><strong>2.0-K 的"不联网"口径</strong>：跨版本不变量写的是「不读写游戏内存、不联网」。</li></ol>
+<p>因此更新入口<strong>只调用 <code>webbrowser.open</code> 把 Release 页交给系统浏览器</strong>， 程序自身不发起任何网络请求、不下载、不解析版本，且默认关闭。 AST 测试禁止 urllib / requests / socket / http.client 出现在这个函数里。</p>
+<ol><li><strong>2.0-J 的覆盖边界</strong>：i18n 覆盖可见控件与菜单；<strong>日志、诊断、异常文本保留中文</strong>——</li></ol>
+<p>译文会掩盖排查线索。语言切换写 <code>settings.locale</code>，重启生效（重建控件比运行时 逐个改更可靠，也不动 Tab 顺序），提供一键重启。</p>
+<ol><li><strong>2.0-I 不自动搬运配置</strong>：模式存 exe 旁独立 <code>path-mode.txt</code>，避免"读配置前先知道</li></ol>
+<p>配置在哪"的循环依赖；切换只影响下次启动，复制是显式操作且拒绝覆盖、不删原文件。</p>
+<ol><li><strong>2.0-L 不做 PyPI 发布</strong>：只让 <code>pip install -e .</code> / <code>vcct</code> 命令真正成立、写清架构约束。</li></ol>
+<p>上传 PyPI 需要长期维护承诺与对外发布动作，属 Out of Scope，留给真有人复用时再说。</p>
+<ol><li><strong>2.1-D 的必要性</strong>：GUI 子系统（<code>console=False</code>）exe 在交互控制台看不到 stdout，</li></ol>
+<p>故新增 <code>console=True</code> 的独立 CLI exe，而不是改主 exe 的形态。</p>
+<h2>落点</h2>
+<table><thead><tr><th>编号</th><th>文件</th></tr></thead><tbody>
+<tr><td>2.0-I</td><td><code>vcct/paths.py</code>（新增）、<code>vcct/loggingx.py</code>（复用 data_root）、<code>vc_cheat_typer.py</code>（<code>--portable</code>/<code>--userdata</code>、设置页数据目录面板、<code>relaunch()</code>）</td></tr>
+<tr><td>2.0-J</td><td><code>vcct/i18n.py</code>（新增）、<code>vcct/const.py</code>（<code>locale</code>）、<code>vc_cheat_typer.py</code>（<code>_build_ui</code> 末尾套用、<code>bind_dialog_keys</code> 后处理、设置页语言组合框）</td></tr>
+<tr><td>2.0-K</td><td><code>vcct/const.py</code>（<code>check_updates</code>）、<code>vc_cheat_typer.py</code>（<code>check_updates()</code> + 菜单项，默认关闭）</td></tr>
+<tr><td>2.0-L</td><td><code>pyproject.toml</code>（重写：build-system / scripts / packages / version 对齐）、<code>CONTRIBUTING.md</code>（新增）</td></tr>
+<tr><td>2.1-D</td><td><code>cli_entry.py</code>、<code>VC-Cheat-Typer-cli.spec</code>、<code>build.ps1</code>（第三个产物 + SHA256）</td></tr>
+<tr><td>测试</td><td><code>tests/test_v2_1.py</code>（21 条）、<code>tests/test_v2_core.py</code>（版本断言改动态）</td></tr>
+</tbody></table>
+<h2>兼容性</h2>
+<ul><li>配置 v3 不变；新设置项 <code>locale</code> / <code>check_updates</code> 缺省 = 中文 / 关闭；旧配置读到自动补默认值</li><li><code>data_path()</code> 默认仍指向 exe 旁，1.6～2.0 用户升级零感知</li><li><code>.vcpack</code> 格式、<code>pack_version</code>、发送策略与目标规则行为全部不变</li><li><code>pyproject.toml</code> 版本号从陈旧的 <code>1.5.0</code> 校正为 <code>2.1.0</code>，与 <code>APP_VER</code> 一致（测试守着）</li></ul>
+<h2>本版额外修掉的真 bug（开发过程中由 <code>-X faulthandler</code> 抓到）</h2>
+<table><thead><tr><th>问题</th><th>根因</th><th>修复</th></tr></thead><tbody>
+<tr><td>完整测试套件中途 <strong>Windows access violation / rc=127</strong></td><td>托盘固定窗口类名 <code>VCCT_TrayWnd</code>：第二个实例 <code>RegisterClassW</code> 报 1410 后继续用旧类，旧类 <code>lpfnWndProc</code> 指向已回收回调；同时自建 WinDLL 的大多数函数没声明 64 位签名，句柄被截断</td><td>每实例唯一类名、退出时 <code>DestroyWindow</code> + <code>UnregisterClassW</code>；补齐全部 argtypes/restype；<code>close()</code> 短等 <code>_tid</code>。修后 208 条测试 0 次 AV</td></tr>
+<tr><td><code>pip install -e .</code> 实际失败</td><td><code>pyproject.toml</code> 停留在 <code>version=1.5.0</code>、缺 <code>[build-system]</code>；<code>--no-build-isolation</code> 下还缺 <code>wheel</code></td><td>重写元数据；在无 tkinter 的 3.13（自带 setuptools+wheel）实测通过</td></tr>
+</tbody></table>
+<h2>验证</h2>
+<ul><li><code>python -m unittest discover -s tests</code> → <strong>208 条通过</strong>（2 条环境跳过，新增 24）</li><li><code>python -X faulthandler -m unittest discover -s tests</code> → <strong>0 次 access violation</strong></li><li><code>ruff check vc_cheat_typer.py vcct/ tools/ cli_entry.py</code> → 0 告警</li><li><code>--selftest</code> 全部通过（新增 <code>[2h]</code> 段：数据模式 / i18n / 设置项）</li><li><code>pip install -e . --no-build-isolation</code> 在<strong>无 tkinter 的 Python 3.13</strong> 实测成功；</li></ul>
+<p>从项目外 <code>import vcct.core</code> 成功且 <code>tkinter not in sys.modules</code>；<code>vcct version</code> 可用</p>
+<ul><li><code>build.ps1 -OneDir</code> 实测三产物（onefile / onedir zip / console CLI）+ 各自 SHA256</li><li>三产物 exe 自检 / <code>sha256sum -c</code> 校验通过；CI 3.10 / 3.12 双绿</li></ul>
+<h2>待真机验证</h2>
+<p>切换 <code>userdata</code> 后重启是否确实读写新目录（含日志）、复制配置后数据一致、 英文模式下各弹窗与菜单文案、一键重启、<code>VC-Cheat-Typer-cli.exe</code> 在 <code>cmd</code> 里直接可见输出、 更新入口点击只开浏览器不联网。</p>
+<h2>仍不做（Out of Scope）</h2>
+<p>macOS 后端（<code>docs/MACOS-PORT.md</code> 暂缓）、自动更新下载、遥测 / 云同步 / 账号、 代码签名、界面框架重写、宏录制 / 定时循环、PyPI 正式发布。</p></article><div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div></div></body></html>
