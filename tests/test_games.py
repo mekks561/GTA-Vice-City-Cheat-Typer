@@ -138,6 +138,31 @@ class TestTrayModuleStructure(unittest.TestCase):
         self.assertFalse(tray._failed)
         tray.close()  # 幂等
 
+    def test_tray_win32_signatures_complete(self):
+        """2.1 回归：64 位句柄不能被 ctypes 默认的 32 位 int 截断。"""
+        import ctypes
+        from ctypes import wintypes
+        import importlib
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        mod = importlib.import_module("vcct.tray")
+        self.assertEqual(len(mod.user32.CreateWindowExW.argtypes), 12)
+        self.assertIs(mod.user32.CreateWindowExW.restype, wintypes.HWND)
+        self.assertIs(mod.kernel32.GetModuleHandleW.restype, wintypes.HMODULE)
+        self.assertEqual(len(mod.shell32.Shell_NotifyIconW.argtypes), 2)
+        self.assertEqual(len(mod.user32.GetMessageW.argtypes), 4)
+
+    def test_tray_multiple_instances(self):
+        """2.1 回归：同进程反复创建/关闭托盘（旧实现会因野指针窗口过程崩溃）。"""
+        import importlib
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        mod = importlib.import_module("vcct.tray")
+        for _ in range(3):
+            tray = mod.TrayIcon(tooltip="t", emit=lambda a: None)
+            self.assertIn("_failed", tray.__dict__)
+            tray.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

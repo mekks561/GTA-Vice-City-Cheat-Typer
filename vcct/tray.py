@@ -70,6 +70,63 @@ if IS_WIN:
     user32.DefWindowProcW.restype = ctypes.c_longlong
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    # 2.1：显式声明窗口类注册/注销签名，并让每个实例用唯一类名。
+    # 旧实现固定 "VCCT_TrayWnd"：第二个实例 RegisterClassW 报 1410 后继续用旧类，
+    # 旧类的 lpfnWndProc 指向已被回收的回调 → 消息到达时 access violation（实测复现）。
+    user32.RegisterClassW.argtypes = [ctypes.c_void_p]
+    user32.RegisterClassW.restype = wintypes.ATOM
+    user32.UnregisterClassW.argtypes = [wintypes.LPCWSTR, wintypes.HINSTANCE]
+    user32.UnregisterClassW.restype = wintypes.BOOL
+    user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.DestroyWindow.restype = wintypes.BOOL
+
+    # 2.1：补齐全部 64 位签名。旧实现只给少数函数声明了 argtypes，
+    # 其余函数走 ctypes 默认的 int（32 位）转换，句柄/HWND 被截断 →
+    # RegisterClassW / CreateWindowExW 处随机 access violation（faulthandler 实测）。
+    _PMSG = ctypes.POINTER(wintypes.MSG)
+    _PPOINT = ctypes.POINTER(wintypes.POINT)
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    kernel32.GetModuleFileNameW.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    kernel32.GetModuleFileNameW.restype = wintypes.DWORD
+    kernel32.GetCurrentThreadId.argtypes = []
+    kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+    user32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
+    user32.RegisterWindowMessageW.restype = wintypes.UINT
+    user32.CreateWindowExW.argtypes = [
+        wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.GetMessageW.argtypes = [_PMSG, wintypes.HWND, wintypes.UINT, wintypes.UINT]
+    user32.GetMessageW.restype = ctypes.c_int
+    user32.TranslateMessage.argtypes = [_PMSG]
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = [_PMSG]
+    user32.DispatchMessageW.restype = ctypes.c_longlong
+    user32.PostQuitMessage.argtypes = [ctypes.c_int]
+    user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+    user32.LoadIconW.restype = wintypes.HICON
+    user32.CreatePopupMenu.argtypes = []
+    user32.CreatePopupMenu.restype = wintypes.HMENU
+    user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t,
+                                   wintypes.LPCWSTR]
+    user32.AppendMenuW.restype = wintypes.BOOL
+    user32.DestroyMenu.argtypes = [wintypes.HMENU]
+    user32.DestroyMenu.restype = wintypes.BOOL
+    user32.GetCursorPos.argtypes = [_PPOINT]
+    user32.GetCursorPos.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int,
+                                      ctypes.c_int, ctypes.c_int, wintypes.HWND,
+                                      ctypes.c_void_p]
+    user32.TrackPopupMenu.restype = ctypes.c_int
+    shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD,
+                                          ctypes.POINTER(_NOTIFYICONDATAW)]
+    shell32.Shell_NotifyIconW.restype = wintypes.BOOL
+    shell32.ExtractIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT]
+    shell32.ExtractIconW.restype = wintypes.HICON
 
     class _WNDCLASSW(ctypes.Structure):
         _fields_ = [
@@ -143,13 +200,14 @@ class TrayIcon:
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
         self._proc = WNDPROC(wnd_proc)          # 引用必须活着，否则回调变野指针
-        cls_name = "VCCT_TrayWnd"
+        # 类名按实例唯一：多个 CheatApp / 测试实例并存、或上一个实例刚 close 时，
+        # 绝不复用别人注册过的窗口类（2.1 修复）。
+        cls_name = f"VCCT_TrayWnd_{id(self):x}_{threading.get_ident()}"
         wc = _WNDCLASSW()
         wc.lpfnWndProc = self._proc
         wc.hInstance = hinst
         wc.lpszClassName = cls_name
-        if not user32.RegisterClassW(ctypes.byref(wc)) and ctypes.get_last_error() != 1410:
-            # 1410 = CLASS_ALREADY_EXISTS（上次进程异常退出残留），可继续用
+        if not user32.RegisterClassW(ctypes.byref(wc)):
             self._failed = True
             self.on_error(f"托盘窗口类注册失败（错误码 {ctypes.get_last_error()}）")
             return
@@ -157,6 +215,7 @@ class TrayIcon:
         hwnd = user32.CreateWindowExW(0, cls_name, "VCCT tray", 0x00000000,  # WS_OVERLAPPED
                                       0, 0, 0, 0, None, None, hinst, None)
         if not hwnd:
+            user32.UnregisterClassW(cls_name, hinst)
             self._failed = True
             self.on_error(f"托盘窗口创建失败（错误码 {ctypes.get_last_error()}）")
             return
@@ -166,6 +225,8 @@ class TrayIcon:
         if not self._add_icon(hwnd):
             self._failed = True
             self.on_error("托盘图标注册失败（Shell_NotifyIcon NIM_ADD）")
+            user32.DestroyWindow(hwnd)
+            user32.UnregisterClassW(cls_name, hinst)
             return
         self.available = True
 
@@ -174,6 +235,12 @@ class TrayIcon:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
         self.available = False
+        # 退出时销毁窗口并注销类，不给进程留下指向已回收回调的窗口类
+        try:
+            user32.DestroyWindow(hwnd)
+        except Exception:
+            pass
+        user32.UnregisterClassW(cls_name, hinst)
 
     def _load_icon(self, hinst) -> int:
         """优先取本进程 exe 内嵌图标（打包后即产品图标），失败退回系统默认。"""
@@ -247,6 +314,12 @@ class TrayIcon:
         except Exception:
             pass
         try:
+            # 线程可能还没走到 GetCurrentThreadId：短等一会儿再投递 WM_QUIT，
+            # 否则 close() 会留下一个永远不自退的消息循环（2.1 修）。
+            for _ in range(50):
+                if self._tid:
+                    break
+                threading.Event().wait(0.01)
             if self._tid:
                 user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
             self._thread.join(timeout=1.0)
