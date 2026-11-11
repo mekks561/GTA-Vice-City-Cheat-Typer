@@ -94,12 +94,20 @@ from vcct.loggingx import (  # noqa: F401
 from vcct.i18n import (  # noqa: F401
     LOCALES, apply_locale_to_widgets, get_locale, set_locale, t,
 )
+# 2.2 Nova UI：自研 UI 基础设施（令牌驱动 / 声明式 / 命令优先），零第三方依赖
+from vcct.ui import (  # noqa: F401
+    CommandPalette, NovaShell, apply_theme, check_contrast, default_commands,
+    tokens as ui_tokens,
+)
 from vcct.paths import (  # noqa: F401
     copy_config_to, data_root, describe as describe_paths, other_mode,
     read_data_mode, set_data_mode,
 )
 from vcct.sender import SendCancelled, SendError, SendParams, type_text
 from vcct.tray import TrayIcon
+
+# 2.2：启动参数 --classic-ui / --nova-ui 只覆盖本次进程，不改配置
+_cli_ui_mode: str | None = None
 
 
 # ----------------------------------------------------------------------------
@@ -526,7 +534,41 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(box3, text="显示更新入口（仅打开 Release 页，程序不联网、不自动下载；重启后生效）",
                         variable=self.app.var_updates,
                         command=self.app._on_setting_change).pack(anchor="w", pady=(8, 0))
+
+        # 2.2 Nova UI 设置
+        box4 = ttk.LabelFrame(frm, text=" 界面（Nova UI） ", padding=12)
+        box4.pack(fill="x", pady=(14, 0))
+        s = self.app.settings
+        self.var_ui_mode = tk.StringVar(value="Nova（新版）" if s.get("ui_mode", "nova") == "nova"
+                                        else "经典（旧版，可回退）")
+        self.var_theme = tk.StringVar(value="深色" if s.get("theme") == "dark" else "浅色")
+        self.var_density = tk.StringVar(value="紧凑" if s.get("density") == "compact" else "舒适")
+        for i, (label, var, values) in enumerate((
+                ("布局", self.var_ui_mode, ["Nova（新版）", "经典（旧版，可回退）"]),
+                ("主题", self.var_theme, ["浅色", "深色"]),
+                ("密度", self.var_density, ["舒适", "紧凑"]))):
+            ttk.Label(box4, text=label).grid(row=i, column=0, sticky="w", pady=4, padx=(0, 12))
+            cbo = ttk.Combobox(box4, textvariable=var, state="readonly", values=values, width=24)
+            cbo.grid(row=i, column=1, sticky="w", pady=4)
+            cbo.bind("<<ComboboxSelected>>", self._change_ui_setting)
+        ttk.Label(box4, text="切换布局 / 主题 / 密度后重启生效；顶栏也可即时切换深浅主题。"
+                  "\n经典布局 = 1.7～2.1 原界面与配色，随时可回退。",
+                  style="Muted.TLabel", justify="left").grid(
+                      row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(box4, text="立即重启", command=self.app.relaunch).grid(
+            row=4, column=0, sticky="w", pady=(8, 0))
         return frm
+
+    def _change_ui_setting(self, *_):
+        s = self.app.settings
+        s["ui_mode"] = "classic" if self.var_ui_mode.get().startswith("经典") else "nova"
+        s["theme"] = "dark" if self.var_theme.get() == "深色" else "light"
+        s["density"] = "compact" if self.var_density.get() == "紧凑" else "comfortable"
+        self.app.persist()
+        messagebox.showinfo("界面设置已保存",
+                            "布局 / 主题 / 密度将在下次启动生效。\n"
+                            "可点「立即重启」马上查看；深浅主题也可在 Nova 顶栏即时切换。",
+                            parent=self)
 
     def _change_locale(self, *_):
         code = "en" if self.var_locale.get() == "English" else "zh"
@@ -1617,6 +1659,19 @@ class CheatApp:
         self._active_target: dict | None = None   # 2.0 当前命中的目标规则解析结果
         self.hooks = HookBus(enabled=False)      # 2.0 扩展点，默认关闭
         set_locale(self.settings.get("locale", "zh"))   # 2.1 界面语言（默认中文）
+        # 2.2 Nova UI：主题原地写入 const.C，既有上百处 C[...] 引用自动跟随
+        self.ui_mode = _cli_ui_mode or self.settings.get("ui_mode", "nova")
+        self.nova_ui = self.ui_mode == "nova"
+        self.ui_theme = self.settings.get("theme", "light")
+        self.ui_density = self.settings.get("density", "comfortable")
+        if self.ui_theme not in ("light", "dark"):
+            self.ui_theme = "light"
+        if self.ui_density not in ("comfortable", "compact"):
+            self.ui_density = "comfortable"
+        apply_theme(self.ui_theme, classic=not self.nova_ui)
+        self.ui_tokens = ui_tokens(self.ui_theme, self.ui_density)
+        self.shell = None
+        self.command_registry = None
         self._make_vars()
         self.hooks.enabled = bool(self.settings.get("hooks_enabled", False))
 
@@ -1689,18 +1744,22 @@ class CheatApp:
             self.log("已最小化到托盘：点托盘图标恢复，右键可退出"
                      "（设置 → 常规 可改回「关闭即退出」）。", "info")
 
-    def _setup_style(self):
+    def _setup_style(self, reset_geometry: bool = True):
         self.ui = ui_scale(self.root)
         self.root.title(f"{APP_NAME} v{APP_VER}")
         self.root.configure(bg=C["bg"])
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        w = min(int(WIN_W * self.ui), max(640, sw - 40))
-        h = min(int(WIN_H * self.ui), max(480, sh - 90))
-        self.root.geometry(f"{w}x{h}")
-        self.root.minsize(min(int(900 * self.ui), w), min(int(600 * self.ui), h))
+        if reset_geometry:
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            w = min(int(WIN_W * self.ui), max(640, sw - 40))
+            h = min(int(WIN_H * self.ui), max(480, sh - 90))
+            self.root.geometry(f"{w}x{h}")
+            self.root.minsize(min(int(900 * self.ui), w), min(int(600 * self.ui), h))
         style = ttk.Style(self.root)
         try:
-            style.theme_use("clam")
+            # 已是 clam 就不要重复切换：ttk 会向所有控件广播 <<ThemeChanged>>，
+            # 同进程反复建窗口（测试/重启）时可能投递到已销毁的解释器。
+            if style.theme_use() != "clam":
+                style.theme_use("clam")
         except tk.TclError:
             pass
         style.configure(".", font=("Microsoft YaHei UI", 10), background=C["bg"], foreground=C["text"])
@@ -1732,7 +1791,18 @@ class CheatApp:
     # -- 布局 ---------------------------------------------------------------
     def _build_ui(self):
         root = self.root
-        outer = ttk.Frame(root, padding=(16, 14, 16, 10))
+        # 2.2：Nova 模式先搭外壳，再把**原有控件树原封不动**挂进内容区；
+        # classic 模式直接挂 root，等于 1.7~2.1 的原布局（一键回退）。
+        content_host = root
+        if self.nova_ui:
+            self.command_registry = default_commands(self)
+            self.shell = NovaShell(
+                root, self, self.ui_tokens, self.command_registry,
+                on_command_panel=self.open_command_palette,
+                on_theme=self.toggle_theme,
+                title=f"{APP_NAME}  ·  Nova")
+            content_host = self.shell.content_host
+        outer = ttk.Frame(content_host, padding=(16, 14, 16, 10))
         outer.pack(fill="both", expand=True)
 
         head = ttk.Frame(outer)
@@ -1901,6 +1971,7 @@ class CheatApp:
 
         # 全局快捷键（界面内）：搜索 / 撤销 / 清空搜索
         self.root.bind("<Control-f>", lambda e: self._focus_search())
+        self.root.bind("<Control-k>", lambda e: self.open_command_palette())
         self.root.bind("<Control-z>", lambda e: self.undo_last())
         self.root.bind("<Escape>", lambda e: self._on_escape())
 
@@ -2016,7 +2087,22 @@ class CheatApp:
             pass
         # 1.9.1：放在 try 外面——游戏检测抛异常不该连带跳过自动切方案
         self._auto_switch_tick()
+        self._refresh_nova_status()
         self.root.after(3000, self._update_game_status)
+
+    def _refresh_nova_status(self):
+        """2.2：3s 周期把分散的状态聚合到底部状态中心（不新增轮询）。"""
+        if not self.shell:
+            return
+        game_ok = bool(self.game_info and self.game_info[0])
+        self._nova_status("game", "游戏 ● 已检测" if game_ok else "游戏 ● 未检测",
+                          "ok" if game_ok else "idle")
+        bad = len(self.conflicts or {})
+        self._nova_status("hotkeys",
+                          "热键 ● 全部就绪" if not bad else f"热键 ● {bad} 个冲突",
+                          "ok" if not bad else "warn")
+        self._nova_status("config", f"配置 ● {read_data_mode()} / {self.ui_theme}")
+        self._nova_status("locale", "中文 ●" if get_locale() == "zh" else "EN ●")
 
     # -- 1.8 按游戏自动切方案 ---------------------------------------------------
     def _auto_switch_tick(self):
@@ -3269,6 +3355,37 @@ class CheatApp:
         except Exception as exc:
             self.log(f"热键总览打开失败：{exc}", "warn")
 
+    def open_command_palette(self):
+        """2.2：Ctrl+K 命令面板。只调用既有业务方法，不新增流程。"""
+        if not self.command_registry:
+            self.command_registry = default_commands(self)
+        try:
+            CommandPalette(self.root, self.command_registry, self.ui_tokens,
+                           on_status=self._nova_command_status,
+                           scale=float(getattr(self, "ui", 1.0)))
+        except Exception as exc:
+            self.log(f"命令面板打开失败：{exc}", "warn")
+
+    def _nova_command_status(self, text: str):
+        self._nova_status("send", text, "ok" if text.startswith("✔") else "warn")
+
+    def _nova_status(self, key: str, text: str, kind: str = "idle"):
+        if self.shell:
+            self.shell.set_status(key, text[:28], kind)
+
+    def toggle_theme(self):
+        """2.2：浅/深主题即时切换，只改色不重建控件（验收 I3）。"""
+        self.ui_theme = "dark" if self.ui_theme == "light" else "light"
+        self.settings["theme"] = self.ui_theme
+        self.persist()
+        apply_theme(self.ui_theme, classic=not self.nova_ui)
+        self.ui_tokens = ui_tokens(self.ui_theme, self.ui_density)
+        self._setup_style(reset_geometry=False)  # 只重配 ttk 样式，不动窗口几何
+        if self.shell:
+            self.shell.tk_tokens = self.ui_tokens
+            self.shell.refresh_theme(self.ui_tokens)
+        self.log(f"界面主题已切换为{'深色' if self.ui_theme == 'dark' else '浅色'}。", "info")
+
     def check_updates(self):
         """2.0-K：只把 Release 页交给系统浏览器打开。
 
@@ -3606,6 +3723,19 @@ def selftest() -> int:
     ok &= (DEFAULT_SETTINGS.get("locale") == "zh"
            and DEFAULT_SETTINGS.get("check_updates") is False)
 
+    print("[2i] 2.2 Nova UI：设计令牌 / 命令注册表 / 双主题")
+    wc = check_contrast(ui_tokens("light").colors)
+    wcd = check_contrast(ui_tokens("dark").colors)
+    print(f"    WCAG 浅色最小 {min(v['ratio'] for v in wc.values())}:1 / "
+          f"深色最小 {min(v['ratio'] for v in wcd.values())}:1（要求 ≥4.5）")
+    ok &= all(v["pass"] for v in list(wc.values()) + list(wcd.values()))
+    reg = default_commands(None)
+    print(f"    命令注册表 {len(reg)} 项；模糊搜索 'hist' 命中 "
+          f"{len(reg.search('hist'))} 条")
+    ok &= len(reg) >= 20 and bool(reg.search("hist"))
+    print(f"    UI 形态 nova / classic 双模式，配置版本 STORE_VERSION={STORE_VERSION}")
+    ok &= STORE_VERSION == 3
+
     print("[3] 前台窗口探测：", foreground_info())
 
     # 真实注入测试：隐藏原生 Win32 窗口验证"扫描码→VK→WM_CHAR"全链路
@@ -3684,6 +3814,7 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
     add("配置", data_path())
     add("数据模式", f"{read_data_mode()}（模式文件 {describe_paths()['mode_file']}）")
     add("界面语言", get_locale())
+    add("界面形态", f"{DEFAULT_SETTINGS.get('ui_mode')} / theme={DEFAULT_SETTINGS.get('theme')}")
     add("日志", log_file())
 
     hwnd, title, exe = find_game_window()
@@ -3756,6 +3887,12 @@ def main() -> int:
         set_data_mode("user")
     elif "--portable" in sys.argv:
         set_data_mode("portable")
+    # 2.2：UI 形态启动参数（优先级高于配置，但不写回配置）
+    global _cli_ui_mode
+    if "--classic-ui" in sys.argv:
+        _cli_ui_mode = "classic"
+    elif "--nova-ui" in sys.argv:
+        _cli_ui_mode = "nova"
     if "--diagnose" in sys.argv:
         return diagnose()
     if "--selftest" in sys.argv:

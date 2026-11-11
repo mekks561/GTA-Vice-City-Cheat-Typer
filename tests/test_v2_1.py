@@ -177,7 +177,7 @@ class TestSettingsAndPackaging(unittest.TestCase):
         self.assertIn("[build-system]", text)
         self.assertIn('build-backend = "setuptools.build_meta"', text)
         self.assertIn(f'version = "{APP_VER}"', text, "pyproject 版本必须与 APP_VER 一致")
-        self.assertIn('packages = ["vcct", "vcct.core"]', text)
+        self.assertIn('packages = ["vcct", "vcct.core", "vcct.ui"]', text)
         self.assertIn("[project.scripts]", text)
 
     def test_cli_entry_has_main(self):

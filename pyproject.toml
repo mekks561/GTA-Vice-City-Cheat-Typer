@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vc-cheat-typer"
-version = "2.1.0"
+version = "2.2.0"
 description = "VC-Cheat-Typer - Windows keyboard-input tool with a reusable zero-GUI core"
 readme = "README.en.md"
 requires-python = ">=3.8"
@@ -18,7 +18,7 @@ vcct = "vcct.cli:main"
 dev = ["pytest>=7", "ruff>=0.4"]
 
 [tool.setuptools]
-packages = ["vcct", "vcct.core"]
+packages = ["vcct", "vcct.core", "vcct.ui"]
 
 [tool.ruff]
 line-length = 140

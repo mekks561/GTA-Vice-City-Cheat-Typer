@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VC-Cheat-Typer"
-APP_VER = "2.1.0"
+APP_VER = "2.2.0"
 IS_WIN = os.name == "nt"
 
 
@@ -37,6 +37,10 @@ DEFAULT_SETTINGS = {
     # --- 2.1 新增（可选，缺省 = 旧行为） ---
     "locale": "zh",           # 界面语言 zh/en；默认中文
     "check_updates": False,   # 菜单显示「检查更新」入口，默认关闭
+    # --- 2.2 Nova UI（可选；ui_mode=classic 时其余两项被忽略） ---
+    "ui_mode": "nova",        # nova（新骨架）/ classic（1.7~2.1 原布局，一键回退）
+    "theme": "light",         # light / dark
+    "density": "comfortable", # comfortable / compact
 }
 
 # 参数预设：经典版按帧率 30fps 调优；决定版(Unreal)输入窗口更宽但帧率不定，整体放慢

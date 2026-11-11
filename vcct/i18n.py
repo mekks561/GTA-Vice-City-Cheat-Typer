@@ -148,6 +148,18 @@ EN_TEXT: dict[str, str] = {
     "条目": "Item", "所属方案": "Profile", "勾选": "Pick",
     "行号": "Line", "代码": "Code", "方式": "Type", "包版本": "Pack ver.",
     "导入时间": "Imported at", "包名": "Pack", "作者": "Author", "游戏": "Game",
+    # 2.2 Nova UI
+    "切换主题": "Toggle theme", "⌘K  命令面板": "⌘K  Command palette",
+    "命令面板": "Command palette",
+    "↑↓ 选择 · Enter 执行 · Esc 关闭": "↑↓ select · Enter run · Esc close",
+    " 秘籍": " Cheats", " 热键": " Hotkeys", " 内容": " Content",
+    " 数据": " Data", " 帮助": " Help",
+    "游戏 ●": "Game ●", "热键 ●": "Hotkeys ●", "发送 ●": "Send ●",
+    "配置 ●": "Config ●", "中文 ●": "中文 ●",
+    "界面（Nova UI）": " UI (Nova UI) ",
+    "布局": "Layout", "主题": "Theme", "密度": "Density",
+    "Nova（新版）": "Nova (new)", "经典（旧版，可回退）": "Classic (legacy, fallback)",
+    "浅色": "Light", "深色": "Dark", "舒适": "Comfortable", "紧凑": "Compact",
 }
 # 注：上面若出现同义中文，dict 会自动保留最后一条；运行时不影响正确性。
 

@@ -116,6 +116,11 @@ try {
         $oneDirPath = Join-Path $distDir "VC-Cheat-Typer-onedir"
         if (-not (Test-Path -LiteralPath $oneDirPath)) { throw "onedir output missing" }
         $zipPath = Join-Path $distDir ("VC-Cheat-Typer-onedir-" + $version + ".zip")
+        if (Test-Path -LiteralPath $zipPath) {
+            Move-Item -LiteralPath $zipPath -Destination (Join-Path $distDir (
+                "VC-Cheat-Typer-onedir-" + $version + ".zip.previous-" +
+                (Get-Date -Format "yyyyMMdd-HHmmss"))) -Force
+        }
         Compress-Archive -LiteralPath $oneDirPath -DestinationPath $zipPath -Force
         $zHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $zShaPath = $zipPath + ".sha256.txt"
