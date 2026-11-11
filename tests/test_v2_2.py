@@ -154,7 +154,8 @@ class TestInteractionAndPerformance(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mod.load_store, cls.mod.save_store = cls.old_load, cls.old_save
-        print("\n[2.2 实测耗时] " + "  ".join(f"{k}={v:.1f}ms" for k, v in BENCH.items()))
+        # CI 控制台可能是 cp1252，输出必须保持 ASCII，否则 UnicodeEncodeError。
+        print("\n[2.2 bench] " + "  ".join(f"{k}={v:.1f}ms" for k, v in BENCH.items()))
 
     def _make_app(self, mode="nova"):
         store = default_store()
