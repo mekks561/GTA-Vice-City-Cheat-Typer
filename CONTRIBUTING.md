@@ -11,6 +11,11 @@ vcct/
 │   ├── targets.py    目标应用规则（纯逻辑）
 │   ├── strategy.py   发送策略（纯逻辑）
 │   └── hooks.py      扩展点（纯逻辑）
+├── ui/            # 2.2 自研 UI 基础设施（仍只用 tkinter/ttk 标准库）
+│   ├── theme.py       设计令牌（唯一允许出现颜色字面量的 UI 模块）
+│   ├── components.py  声明式组件
+│   ├── shell.py       NovaShell 骨架
+│   └── commands.py    命令注册表 + Ctrl+K 面板
 ├── const.py / winapi.py / hotkeys.py / sender.py / store.py / packs.py
 ├── loggingx.py / templates.py / importer.py / paths.py / i18n.py
 ├── tray.py / cli.py
@@ -31,6 +36,11 @@ import、PyInstaller spec 与 CLI（路线图风险 R2.0.1）。
    `send_key` / `lookup_vk`；所有 Win32 调用集中在 `winapi.py`。
 
 `tests/test_v2_core.py::TestCoreBoundary` 用 AST 守住前两条，CI 每次跑。
+2.2 追加第四条（由 `tests/test_v2_2.py` 守住）：
+
+4. **`vcct/ui/` 除 `theme.py` 外不得硬编码 `#RRGGBB`**；不得出现阻塞调用；
+   新界面文案进 `i18n.EN_TEXT`。UI 层只调用 `CheatApp` 既有方法，不新增业务入口。
+   改配色一律改 `theme.py` 的令牌表（浅/深两套键必须一致），不要改 `const.C` 的默认值。
 
 ## 3. 跨版本不变量（任何情况下不牺牲）
 

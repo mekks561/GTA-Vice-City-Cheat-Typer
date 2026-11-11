@@ -18,11 +18,64 @@ th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-ali
 th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
 margin:14px 0;padding:8px 16px;color:#374151}
 ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
-</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer</h1>
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="PLAN-2.2.html">PLAN-2.2</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>VC-Cheat-Typer</h1>
 <p><a href="https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml/badge.svg">![CI</a>](https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/actions/workflows/ci.yml)</p>
 <blockquote>GTA: Vice City（罪恶都市）秘籍一键输入器 — Windows / 单文件 / 零第三方依赖</blockquote>
 <p>一个<strong>单文件、零第三方依赖</strong>的 Windows 桌面小工具：按一下快捷键，它替你在游戏里"打字"输入秘籍。</p>
-<ul><li>秘籍列表：查看 / 按分组切换 / 按使用次数排序，双击编辑</li><li>自定义：可添加、编辑、删除秘籍（名称 / 代码 / 分组 / 备注）</li><li>独立快捷键：每条秘籍单独绑定、捕获式改键（按下即录入），支持 Ctrl/Alt/Shift/Win 组合</li><li>冲突提示：组合键被系统或其他程序占用时，对应行标红 + 状态栏告警 + 日志说明</li><li>前台校验：默认只在目标游戏窗口处于前台时才发送，不会误打进聊天窗口；支持按进程名自动检测游戏</li><li>中文输入法免疫：发送期间自动摘掉目标窗口的 IME 关联（这是"代码没错但打不出字"的头号原因）</li><li>方案组：多套秘籍方案（如「默认」「速通」）一键切换，各自独立的快捷键与条目</li><li>游戏内悬浮提示：发送结果以不抢焦点的 toast 显示在屏幕右下角（WS_EX_NOACTIVATE）</li><li>注入自检：一键验证"扫描码 → 虚拟键 → WM_CHAR"全链路，无需进游戏</li><li>导入/导出：一键分享整份方案</li><li>配置持久化：方案、设置、使用统计保存在同目录 cheats.json（v2 格式，自动迁移 v1）</li><li>全局暂停：一键注销全部秘籍热键（默认 <code>Ctrl+Alt+P</code>），在聊天窗口/编辑器里也不怕误触</li><li>搜索：名称/代码/备注/分组实时过滤，与分组筛选叠加（<code>Ctrl+F</code> 聚焦，<code>Esc</code> 清空——发送中则优先停发送）</li><li>撤销：删除秘籍/方案后可 <code>Ctrl+Z</code> 恢复（保留最近一步）</li><li>冲突一键处置：右键冲突行「换一个可用键」，或一键为全部冲突项自动分配空闲组合键</li><li>整包备份/恢复：「⋯ 更多」里导出/导入整份配置（设置 + 全部方案 + 统计），换机、重装不丢数据</li><li>单条速度覆盖：编辑秘籍时可单独设置发送间隔（如慢速长代码设 100ms），默认跟随全局</li><li>高 DPI 适配：125% / 150% 缩放下界面按比例放大，无模糊、无控件裁剪</li><li>统计增强：表格新增「最近使用」列，表头可按 次数/最近/名称 排序，可清空统计，显示「今日 N 次」</li><li>数据安全：配置每次保存前自动留上一版（<code>cheats.bak.json</code>），损坏文件隔离留存并可一键恢复</li><li>可诊断：运行日志与崩溃堆栈自动写入 <code>logs/app.log</code>（窗口闪退也能查到原因）</li><li>发送可中断：发送中按钮原地变「■ 停止」，或按 <code>Esc</code>；暂停 / 关闭程序会立刻中止在飞发送</li><li>残键兜底：任何路径退出（取消 / 异常 / 关窗）都保证按键成对抬起，不会出现"角色一直跑"</li><li>连按去抖：同一秘籍 250ms 内重复触发只发一次（可在「⋯ 更多」→ 设置里改）</li><li>发送质量日志：<code>logs/app.log</code> 记录每次发送的计划/实际时长与偏差，节奏被拖慢（丢字前兆）会打 WARN</li><li>托盘常驻（1.8）：关闭/最小化窗口即收进系统托盘，托盘菜单 显示 / 暂停热键 / 退出；Explorer 重启后图标自动恢复</li><li>按游戏自动切方案（1.8）：配置「游戏规则表」（按进程名或标题匹配），游戏窗口到前台 0.8 秒后自动切换到对应方案（发送中绝不切换）</li><li>首次启动向导（1.8）：选参数预设 → 注入自检 → 冲突检测三步跑通，<code>Ctrl+F1</code> 随时重开</li><li>设置对话框（1.8）：目标关键字 / 间隔 / 方案管理 / 导入导出 / 统计 / 自动切换规则全部收进「⚙ 设置」（常规 / 输入 / 游戏 / 数据 四页），主界面只留高频操作</li><li>热键总览（1.8）：一张表列出全部热键、占用状态、所属方案，冲突红标，支持「重新检测占用」与导出为文本</li><li>配置 v3 + 迁移链（1.9）：v1 / v2 配置自动升级，升版前永久备份 <code>cheats.v2.bak.json</code>；读到更新版本配置会明确提示且<strong>拒绝回写</strong>；<code>--export-v2</code> / 界面导出兼容旧版配置</li><li>秘籍包 <code>.vcpack</code>（1.9）：导出整套秘籍分享；导入前 diff 预览（新增 / 冲突 / 相同），只导入勾选条目，冲突可覆盖可跳过，包内含 sha256 完整性提示</li><li>批量编辑（1.9）：列表多选（Ctrl/Shift），批量改分组 / 分配空闲热键 / 设发送间隔 / 删除（一步撤销整份快照）</li><li>多游戏模板（1.9）：VC 经典版 / 决定版（自动套参数）、GTA III / SA（公开秘籍文本，<strong>未实机验证</strong>条目灰显标注、默认不绑热键）</li><li>文本 / CSV 粘贴导入（1.9）：<code>名称,代码,热键</code> 或纯代码行，逐行报错带行号，预览确认后再导入</li><li>发送历史（1.9.1）：最近 50 次发送（时间/秘籍/方案/结果/耗时/说明），可一键重发、可清空</li><li>键盘全导航（1.9.1）：列表 ↑↓ 选中、<code>Home</code>/<code>End</code> 跳首尾、<code>Enter</code> 发送；所有弹窗 <code>Esc</code> 关闭</li><li>包管理增强（1.9.1）：导入时自动避让热键冲突、同名包版本/内容变化提示</li><li>一键构建（1.9.1）：<code>build.ps1</code> 自动跑单测 + ruff + PyInstaller + 生成 SHA256 清单</li><li>通用输入平台（2.0）：<code>vcct.core</code> 零 tkinter 公共 API、目标规则、发送策略引擎、扩展点、CLI、双产物、离线文档站</li><li>数据目录可选（2.1）：<code>--portable</code>（默认）/ <code>--userdata</code>，切换只影响下次启动，配置搬运需显式复制且不覆盖</li><li>中英双语 UI（2.1）：设置 → 常规 切换，重启生效；日志/诊断仍保留中文便于排查</li><li>离线更新入口（2.1）：只打开 Release 页，程序不发任何网络请求，默认关闭</li><li>可独立安装（2.1）：<code>pip install -e .</code> + <code>vcct</code> 命令；<code>CONTRIBUTING.md</code> 写明架构硬约束</li><li>控制台 CLI 产物（2.1）：<code>VC-Cheat-Typer-cli.exe</code>，交互控制台可见输出</li></ul>
+<ul><li>秘籍列表：查看 / 按分组切换 / 按使用次数排序，双击编辑</li><li>自定义：可添加、编辑、删除秘籍（名称 / 代码 / 分组 / 备注）</li><li>独立快捷键：每条秘籍单独绑定、捕获式改键（按下即录入），支持 Ctrl/Alt/Shift/Win 组合</li><li>冲突提示：组合键被系统或其他程序占用时，对应行标红 + 状态栏告警 + 日志说明</li><li>前台校验：默认只在目标游戏窗口处于前台时才发送，不会误打进聊天窗口；支持按进程名自动检测游戏</li><li>中文输入法免疫：发送期间自动摘掉目标窗口的 IME 关联（这是"代码没错但打不出字"的头号原因）</li><li>方案组：多套秘籍方案（如「默认」「速通」）一键切换，各自独立的快捷键与条目</li><li>游戏内悬浮提示：发送结果以不抢焦点的 toast 显示在屏幕右下角（WS_EX_NOACTIVATE）</li><li>注入自检：一键验证"扫描码 → 虚拟键 → WM_CHAR"全链路，无需进游戏</li><li>导入/导出：一键分享整份方案</li><li>配置持久化：方案、设置、使用统计保存在同目录 cheats.json（v2 格式，自动迁移 v1）</li><li>全局暂停：一键注销全部秘籍热键（默认 <code>Ctrl+Alt+P</code>），在聊天窗口/编辑器里也不怕误触</li><li>搜索：名称/代码/备注/分组实时过滤，与分组筛选叠加（<code>Ctrl+F</code> 聚焦，<code>Esc</code> 清空——发送中则优先停发送）</li><li>撤销：删除秘籍/方案后可 <code>Ctrl+Z</code> 恢复（保留最近一步）</li><li>冲突一键处置：右键冲突行「换一个可用键」，或一键为全部冲突项自动分配空闲组合键</li><li>整包备份/恢复：「⋯ 更多」里导出/导入整份配置（设置 + 全部方案 + 统计），换机、重装不丢数据</li><li>单条速度覆盖：编辑秘籍时可单独设置发送间隔（如慢速长代码设 100ms），默认跟随全局</li><li>高 DPI 适配：125% / 150% 缩放下界面按比例放大，无模糊、无控件裁剪</li><li>统计增强：表格新增「最近使用」列，表头可按 次数/最近/名称 排序，可清空统计，显示「今日 N 次」</li><li>数据安全：配置每次保存前自动留上一版（<code>cheats.bak.json</code>），损坏文件隔离留存并可一键恢复</li><li>可诊断：运行日志与崩溃堆栈自动写入 <code>logs/app.log</code>（窗口闪退也能查到原因）</li><li>发送可中断：发送中按钮原地变「■ 停止」，或按 <code>Esc</code>；暂停 / 关闭程序会立刻中止在飞发送</li><li>残键兜底：任何路径退出（取消 / 异常 / 关窗）都保证按键成对抬起，不会出现"角色一直跑"</li><li>连按去抖：同一秘籍 250ms 内重复触发只发一次（可在「⋯ 更多」→ 设置里改）</li><li>发送质量日志：<code>logs/app.log</code> 记录每次发送的计划/实际时长与偏差，节奏被拖慢（丢字前兆）会打 WARN</li><li>托盘常驻（1.8）：关闭/最小化窗口即收进系统托盘，托盘菜单 显示 / 暂停热键 / 退出；Explorer 重启后图标自动恢复</li><li>按游戏自动切方案（1.8）：配置「游戏规则表」（按进程名或标题匹配），游戏窗口到前台 0.8 秒后自动切换到对应方案（发送中绝不切换）</li><li>首次启动向导（1.8）：选参数预设 → 注入自检 → 冲突检测三步跑通，<code>Ctrl+F1</code> 随时重开</li><li>设置对话框（1.8）：目标关键字 / 间隔 / 方案管理 / 导入导出 / 统计 / 自动切换规则全部收进「⚙ 设置」（常规 / 输入 / 游戏 / 数据 四页），主界面只留高频操作</li><li>热键总览（1.8）：一张表列出全部热键、占用状态、所属方案，冲突红标，支持「重新检测占用」与导出为文本</li><li>配置 v3 + 迁移链（1.9）：v1 / v2 配置自动升级，升版前永久备份 <code>cheats.v2.bak.json</code>；读到更新版本配置会明确提示且<strong>拒绝回写</strong>；<code>--export-v2</code> / 界面导出兼容旧版配置</li><li>秘籍包 <code>.vcpack</code>（1.9）：导出整套秘籍分享；导入前 diff 预览（新增 / 冲突 / 相同），只导入勾选条目，冲突可覆盖可跳过，包内含 sha256 完整性提示</li><li>批量编辑（1.9）：列表多选（Ctrl/Shift），批量改分组 / 分配空闲热键 / 设发送间隔 / 删除（一步撤销整份快照）</li><li>多游戏模板（1.9）：VC 经典版 / 决定版（自动套参数）、GTA III / SA（公开秘籍文本，<strong>未实机验证</strong>条目灰显标注、默认不绑热键）</li><li>文本 / CSV 粘贴导入（1.9）：<code>名称,代码,热键</code> 或纯代码行，逐行报错带行号，预览确认后再导入</li><li>发送历史（1.9.1）：最近 50 次发送（时间/秘籍/方案/结果/耗时/说明），可一键重发、可清空</li><li>键盘全导航（1.9.1）：列表 ↑↓ 选中、<code>Home</code>/<code>End</code> 跳首尾、<code>Enter</code> 发送；所有弹窗 <code>Esc</code> 关闭</li><li>包管理增强（1.9.1）：导入时自动避让热键冲突、同名包版本/内容变化提示</li><li>一键构建（1.9.1）：<code>build.ps1</code> 自动跑单测 + ruff + PyInstaller + 生成 SHA256 清单</li><li>通用输入平台（2.0）：<code>vcct.core</code> 零 tkinter 公共 API、目标规则、发送策略引擎、扩展点、CLI、双产物、离线文档站</li><li>数据目录可选（2.1）：<code>--portable</code>（默认）/ <code>--userdata</code>，切换只影响下次启动，配置搬运需显式复制且不覆盖</li><li>中英双语 UI（2.1）：设置 → 常规 切换，重启生效；日志/诊断仍保留中文便于排查</li><li>离线更新入口（2.1）：只打开 Release 页，程序不发任何网络请求，默认关闭</li><li>可独立安装（2.1）：<code>pip install -e .</code> + <code>vcct</code> 命令；<code>CONTRIBUTING.md</code> 写明架构硬约束</li><li>控制台 CLI 产物（2.1）：<code>VC-Cheat-Typer-cli.exe</code>，交互控制台可见输出</li><li>Nova UI（2.2）：令牌驱动的双主题卡片式界面、侧栏导航、状态中心、<code>Ctrl+K</code> 命令面板；<code>--classic-ui</code> 一键回退旧布局</li></ul>
+<h2>v2.2「Nova UI」更新内容（UI 全面重构）</h2>
+<blockquote>完整规格与验收契约见 <code>docs/PLAN-2.2.md</code>。<strong>配置仍 v3、包格式不变、核心业务代码零改动</strong>。</blockquote>
+<h3>技术栈取舍（重要）</h3>
+<p>需求要求「引入新的技术栈、全面重做 UI」。但项目有两条硬约束：<strong>零第三方运行时依赖</strong> 与 <code>core</code> 零 GUI 依赖；路线图 §9 也把「界面框架重写（Qt/PySide/Web UI）」列为 Out of Scope。 引入 PySide6 / WebView 会让 exe 从 ~10MB 涨到 60MB+、破坏 <code>pip install -e .</code> 的零依赖、 重做三产物与 CI，且<strong>不可回退</strong>。</p>
+<p>因此 2.2 引入的是<strong>项目自研的 UI 基础设施层 <code>vcct/ui/</code></strong>（新的架构范式，仍为零依赖标准库）：</p>
+<table><thead><tr><th>层</th><th>模块</th><th>技术</th></tr></thead><tbody>
+<tr><td>设计令牌</td><td><code>theme.py</code></td><td>颜色/间距/字号单一数据源、浅深双主题、WCAG 对比度计算、原地注入 <code>const.C</code></td></tr>
+<tr><td>组件</td><td><code>components.py</code></td><td>声明式卡片、胶囊、导航项、顶栏、状态中心、空状态</td></tr>
+<tr><td>骨架</td><td><code>shell.py</code></td><td>侧栏 + 顶栏 + 内容区 + 底部状态中心</td></tr>
+<tr><td>交互</td><td><code>commands.py</code></td><td><code>Ctrl+K</code> 命令面板（子序列模糊匹配、23 条命令、纯键盘执行）</td></tr>
+</tbody></table>
+<p><code>apply_theme()</code> 原地更新 <code>vcct.const.C</code>，1.7～2.1 上百处 <code>C["bg"]</code> 引用<strong>无需改动</strong>即跟随新主题——这是"核心零改动"的关键。若确需 Qt/WebView，属于重新立项（需显式接受放弃零依赖与可回退），应另起 v3.0。</p>
+<h3>目标与页面/交互变更</h3>
+<table><thead><tr><th>目标</th><th>落地</th></tr></thead><tbody>
+<tr><td>G1 视觉现代化</td><td>单列工具条 → 卡片式布局；浅/深双主题；舒适/紧凑两档密度；所有颜色出自令牌表</td></tr>
+<tr><td>G2 命令优先</td><td><code>Ctrl+K</code> 命令面板覆盖 23 个既有动作，输入即筛、↑↓ 选、Enter 执行、Esc 关</td></tr>
+<tr><td>G3 信息层级</td><td>侧栏 5 分区（秘籍/热键/内容/数据/帮助）+ 底部 5 个状态胶囊（游戏/热键/发送/配置/语言）</td></tr>
+<tr><td>G4 核心零改动</td><td>发送引擎、热键、托盘、包、迁移链、策略、目标规则、CLI 一行未改；命令只绑定 <code>CheatApp</code> 既有方法</td></tr>
+<tr><td>G5 可回退</td><td><code>--classic-ui</code> 或 设置 → 常规 → 布局「经典」重启，即恢复 1.7～2.1 原布局与配色</td></tr>
+</tbody></table>
+<p><strong>关键实现</strong>：Nova 只把原有 <code>outer</code> 控件树挂进 <code>content_host</code>，所有 <code>self.tree</code> / <code>self.btn_send</code> / 事件绑定保持不变，因此既有 208 条测试与全部业务流程继续成立。</p>
+<h3>现有功能及数据兼容</h3>
+<ul><li>配置仍 <strong>v3</strong>；<code>ui_mode</code>（默认 <code>nova</code>）/ <code>theme</code> / <code>density</code> 全部可选，旧配置读入自动补默认值</li><li>方案、热键、统计、包记录、发送历史、targets、strategies 一字不改；三条升级路径回归继续跑</li><li>旧版每个按钮/菜单在新版仍可达（原工具条 + 侧栏 + 命令面板三通道）</li><li>三产物（onefile / onedir / console CLI）形态不变，各自 SHA256</li><li>2.1 中英双语继续生效；日志/诊断/异常文本仍保留中文</li></ul>
+<h3>验收标准与实测（<code>docs/PLAN-2.2.md</code> §5，测试即契约）</h3>
+<table><thead><tr><th>类别</th><th>标准</th><th>实测</th></tr></thead><tbody>
+<tr><td>视觉 V1</td><td>除 <code>theme.py</code> 外新 UI 模块零硬编码颜色</td><td>AST 扫描通过</td></tr>
+<tr><td>视觉 V2</td><td>正文/背景对比度 ≥4.5:1（WCAG AA），双主题</td><td>浅色最低 <strong>5.26:1</strong>，深色最低 <strong>6.81:1</strong></td></tr>
+<tr><td>视觉 V3/V4/V5</td><td>双主题令牌键一致、密度线性、100/125/150% 三档构建</td><td>全部通过</td></tr>
+<tr><td>交互 I1</td><td>命令面板输入→结果 &lt;50ms</td><td>200 条命令搜索 P95 <strong>0.1ms</strong></td></tr>
+<tr><td>交互 I2</td><td><code>Ctrl+K</code>→输入→↑↓→Enter→Esc 全键盘</td><td>事件模拟通过</td></tr>
+<tr><td>交互 I3</td><td>主题切换 &lt;200ms 且不重建控件树</td><td><strong>6.4ms</strong>，<code>self.tree</code> 对象身份不变</td></tr>
+<tr><td>交互 I4/I5</td><td>UI 层无阻塞调用；两种模式业务方法可调</td><td>AST + 双模式冒烟通过</td></tr>
+<tr><td>响应 R1</td><td>主窗口构建 &lt;1.5s</td><td>nova <strong>79.3ms</strong> / classic <strong>57.3ms</strong></td></tr>
+<tr><td>响应 R2</td><td>1000 条渲染 &lt;300ms</td><td><strong>10.3ms</strong></td></tr>
+<tr><td>响应 R3</td><td>200 条命令过滤 &lt;20ms</td><td><strong>0.1ms</strong></td></tr>
+<tr><td>回归</td><td>228 条单测、ruff 0、selftest、0 次 access violation</td><td>全绿</td></tr>
+</tbody></table>
+<blockquote>CI 上性能断言取规格值 3 倍余量避免机器波动；上表是本机实测值。观感类（窄窗口折叠、三档缩放截图）仍需人工复核。</blockquote>
+<h3>启动参数</h3>
+<pre><code>VC-Cheat-Typer.exe --classic-ui      :: 回退旧布局（本次生效，不改配置）
+VC-Cheat-Typer.exe --nova-ui         :: 强制新布局
+:: 设置 → 常规 → 界面（Nova UI）可持久化切换布局/主题/密度</code></pre>
+<h3>模块结构更新</h3>
+<pre><code>vcct/
+├── core/          零 GUI 公共 API（2.0，未改动）
+├── ui/            ★ 2.2 新增：自研 UI 基础设施
+│   ├── theme.py       设计令牌 / 双主题 / 对比度
+│   ├── components.py  声明式组件
+│   ├── shell.py       NovaShell 骨架
+│   └── commands.py    命令注册表 + Ctrl+K 面板
+├── paths.py / i18n.py / cli.py / tray.py / ... （2.0~2.1，未改动）
+└── const.py / winapi.py / sender.py / hotkeys.py / store.py / packs.py ...
+vc_cheat_typer.py   UI 壳：只新增「主题注入 + 外壳挂载 + Ctrl+K 绑定 + 设置项」</code></pre>
 <h2>v2.1 更新内容（收尾 P1 + 兑现工程承诺）</h2>
 <blockquote>增量版本：<strong>配置仍 v3、包格式不变、默认行为与 v2.0 逐项一致</strong>。路线图规划到 v2.0 为止，本版把剩余 P1 可选项与 v2.0 未落地的工程化补齐。</blockquote>
 <table><thead><tr><th>编号</th><th>功能</th><th>说明</th></tr></thead><tbody>
@@ -245,6 +298,7 @@ python -m vcct.cli pack info cheats.vcpack</code></pre>
 ├── vc_cheat_typer.py  主程序入口（GUI + 自检 + 诊断；逻辑在 vcct/）
 ├── vcct/              核心模块（const/winapi/hotkeys/store/sender/loggingx/tray/packs/importer/templates）
 ├── vcct/core/         2.0 通用输入平台（门面 + targets/strategy/hooks，零 tkinter）
+├── vcct/ui/           2.2 Nova UI（theme/components/shell/commands，零第三方依赖）
 ├── vcct/paths.py      2.1 数据目录（portable / userdata）
 ├── vcct/i18n.py       2.1 中英表驱动文案
 ├── vcct/cli.py        2.0 命令行入口
@@ -260,7 +314,7 @@ python -m vcct.cli pack info cheats.vcpack</code></pre>
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
 ├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
 ├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
-├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md / PLAN-2.1.md  各版执行方案
+├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md / PLAN-2.1.md / PLAN-2.2.md  各版执行方案
 ├── docs/PACK-FORMAT.md   .vcpack 秘籍包格式规范
 ├── docs/MIGRATION.md    配置迁移 / 备份 / 回退说明
 ├── docs/site/           离线文档站（tools/build_docs.py 生成）

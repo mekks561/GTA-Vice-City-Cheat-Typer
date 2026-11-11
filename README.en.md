@@ -52,6 +52,7 @@ If nothing happens: check the red privilege warning → make sure the game windo
 - **Bilingual UI** (v2.1): switch Chinese/English in Settings; logs and diagnostics stay Chinese on purpose
 - **Offline update entry** (v2.1): optional menu item that only opens the Release page in a browser; the app makes no network requests
 - **Installable core** (v2.1): `pip install -e . --no-build-isolation` then `import vcct.core` (verified on a Python without tkinter); `vcct` console script; `CONTRIBUTING.md` documents the hard architecture rules
+- **Nova UI** (v2.2): token-driven light/dark themes, sidebar + status center, `Ctrl+K` command palette with 23 actions, comfortable/compact density; `--classic-ui` restores the legacy layout. Zero third-party runtime dependencies are added; WCAG AA contrast is enforced by tests. See `docs/PLAN-2.2.md`
 - **v3 config with migration chain** (v1.9): v1/v2 configs auto-migrate with a permanent pre-upgrade backup; `--export-v2` writes a config readable by v1.6–v1.8. See [`docs/MIGRATION.md`](docs/MIGRATION.md)
 - **Safety**: cancellable sends (Esc / Stop button), modifier keys always released, debounce, send-quality logging, config backups, crash logs
 

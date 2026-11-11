@@ -18,7 +18,7 @@ th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-ali
 th{background:#eef1f6}blockquote{border-left:4px solid var(--accent);background:#f4f7ff;
 margin:14px 0;padding:8px 16px;color:#374151}
 ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size:13px;margin-top:24px}
-</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>CONTRIBUTING — 架构约束与开发流程</h1>
+</style></head><body><header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1><nav><a href="index.html">首页 / README</a><a href="README.en.html">English README</a><a href="CONTRIBUTING.html">CONTRIBUTING</a><a href="MACOS-PORT.html">MACOS-PORT</a><a href="MIGRATION.html">MIGRATION</a><a href="PACK-FORMAT.html">PACK-FORMAT</a><a href="PLAN-1.7.html">PLAN-1.7</a><a href="PLAN-1.8.html">PLAN-1.8</a><a href="PLAN-1.9.1.html">PLAN-1.9.1</a><a href="PLAN-1.9.html">PLAN-1.9</a><a href="PLAN-2.0.html">PLAN-2.0</a><a href="PLAN-2.1.html">PLAN-2.1</a><a href="PLAN-2.2.html">PLAN-2.2</a><a href="ROADMAP-1.6.html">ROADMAP-1.6</a><a href="ROADMAP-1.7-2.0.html">ROADMAP-1.7-2.0</a></nav></div></header><div class="wrap"><article><h1>CONTRIBUTING — 架构约束与开发流程</h1>
 <blockquote>路线图 5.4 要求把架构约束写进 CONTRIBUTING。本文是<strong>硬约束</strong>，PR 违反即打回。</blockquote>
 <h2>1. 分层</h2>
 <pre><code>vcct/
@@ -27,6 +27,11 @@ ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size
 │   ├── targets.py    目标应用规则（纯逻辑）
 │   ├── strategy.py   发送策略（纯逻辑）
 │   └── hooks.py      扩展点（纯逻辑）
+├── ui/            # 2.2 自研 UI 基础设施（仍只用 tkinter/ttk 标准库）
+│   ├── theme.py       设计令牌（唯一允许出现颜色字面量的 UI 模块）
+│   ├── components.py  声明式组件
+│   ├── shell.py       NovaShell 骨架
+│   └── commands.py    命令注册表 + Ctrl+K 面板
 ├── const.py / winapi.py / hotkeys.py / sender.py / store.py / packs.py
 ├── loggingx.py / templates.py / importer.py / paths.py / i18n.py
 ├── tray.py / cli.py
@@ -39,7 +44,9 @@ ul,ol{padding-left:24px}a{color:var(--accent)}.foot{color:var(--muted);font-size
 <p>平台能力一律通过注入函数传入（见 <code>hooks.make_switch_window_hook</code>）。</p>
 <ol><li><strong>UI 不得直接调 <code>SendInput</code></strong>：一律走 <code>vcct.sender.type_text</code> + 注入的</li></ol>
 <p><code>send_key</code> / <code>lookup_vk</code>；所有 Win32 调用集中在 <code>winapi.py</code>。</p>
-<p><code>tests/test_v2_core.py::TestCoreBoundary</code> 用 AST 守住前两条，CI 每次跑。</p>
+<p><code>tests/test_v2_core.py::TestCoreBoundary</code> 用 AST 守住前两条，CI 每次跑。 2.2 追加第四条（由 <code>tests/test_v2_2.py</code> 守住）：</p>
+<ol><li><strong><code>vcct/ui/</code> 除 <code>theme.py</code> 外不得硬编码 <code>#RRGGBB</code></strong>；不得出现阻塞调用；</li></ol>
+<p>新界面文案进 <code>i18n.EN_TEXT</code>。UI 层只调用 <code>CheatApp</code> 既有方法，不新增业务入口。 改配色一律改 <code>theme.py</code> 的令牌表（浅/深两套键必须一致），不要改 <code>const.C</code> 的默认值。</p>
 <h2>3. 跨版本不变量（任何情况下不牺牲）</h2>
 <ul><li>零第三方<strong>运行时</strong>依赖；</li><li>配置不丢（迁移前备份、失败可回滚、更高版本配置禁止回写）；</li><li>发布必带 SHA256；</li><li>暂停键在任何状态下都能停掉注入（发送睡眠切片 ≤20ms）；</li><li>不读写游戏内存、<strong>不联网</strong>、不支持联机 / 反作弊环境。</li></ul>
 <p>新增字段一律可选：缺省 = 旧行为。允许"程序新 + 配置旧"，不允许"程序旧 + 配置新" 静默降级。配置版本目前 v3，迁移链在 <code>vcct/store.py::migrate_store</code>（纯函数、不碰磁盘）。</p>

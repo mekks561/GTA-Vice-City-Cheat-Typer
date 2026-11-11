@@ -51,6 +51,90 @@
 - 离线更新入口（2.1）：只打开 Release 页，程序不发任何网络请求，默认关闭
 - 可独立安装（2.1）：`pip install -e .` + `vcct` 命令；`CONTRIBUTING.md` 写明架构硬约束
 - 控制台 CLI 产物（2.1）：`VC-Cheat-Typer-cli.exe`，交互控制台可见输出
+- Nova UI（2.2）：令牌驱动的双主题卡片式界面、侧栏导航、状态中心、`Ctrl+K` 命令面板；`--classic-ui` 一键回退旧布局
+
+## v2.2「Nova UI」更新内容（UI 全面重构）
+
+> 完整规格与验收契约见 `docs/PLAN-2.2.md`。**配置仍 v3、包格式不变、核心业务代码零改动**。
+
+### 技术栈取舍（重要）
+
+需求要求「引入新的技术栈、全面重做 UI」。但项目有两条硬约束：**零第三方运行时依赖**
+与 `core` 零 GUI 依赖；路线图 §9 也把「界面框架重写（Qt/PySide/Web UI）」列为 Out of Scope。
+引入 PySide6 / WebView 会让 exe 从 ~10MB 涨到 60MB+、破坏 `pip install -e .` 的零依赖、
+重做三产物与 CI，且**不可回退**。
+
+因此 2.2 引入的是**项目自研的 UI 基础设施层 `vcct/ui/`**（新的架构范式，仍为零依赖标准库）：
+
+| 层 | 模块 | 技术 |
+|---|---|---|
+| 设计令牌 | `theme.py` | 颜色/间距/字号单一数据源、浅深双主题、WCAG 对比度计算、原地注入 `const.C` |
+| 组件 | `components.py` | 声明式卡片、胶囊、导航项、顶栏、状态中心、空状态 |
+| 骨架 | `shell.py` | 侧栏 + 顶栏 + 内容区 + 底部状态中心 |
+| 交互 | `commands.py` | `Ctrl+K` 命令面板（子序列模糊匹配、23 条命令、纯键盘执行） |
+
+`apply_theme()` 原地更新 `vcct.const.C`，1.7～2.1 上百处 `C["bg"]` 引用**无需改动**即跟随新主题——这是"核心零改动"的关键。若确需 Qt/WebView，属于重新立项（需显式接受放弃零依赖与可回退），应另起 v3.0。
+
+### 目标与页面/交互变更
+
+| 目标 | 落地 |
+|---|---|
+| G1 视觉现代化 | 单列工具条 → 卡片式布局；浅/深双主题；舒适/紧凑两档密度；所有颜色出自令牌表 |
+| G2 命令优先 | `Ctrl+K` 命令面板覆盖 23 个既有动作，输入即筛、↑↓ 选、Enter 执行、Esc 关 |
+| G3 信息层级 | 侧栏 5 分区（秘籍/热键/内容/数据/帮助）+ 底部 5 个状态胶囊（游戏/热键/发送/配置/语言） |
+| G4 核心零改动 | 发送引擎、热键、托盘、包、迁移链、策略、目标规则、CLI 一行未改；命令只绑定 `CheatApp` 既有方法 |
+| G5 可回退 | `--classic-ui` 或 设置 → 常规 → 布局「经典」重启，即恢复 1.7～2.1 原布局与配色 |
+
+**关键实现**：Nova 只把原有 `outer` 控件树挂进 `content_host`，所有 `self.tree` / `self.btn_send` / 事件绑定保持不变，因此既有 208 条测试与全部业务流程继续成立。
+
+### 现有功能及数据兼容
+
+- 配置仍 **v3**；`ui_mode`（默认 `nova`）/ `theme` / `density` 全部可选，旧配置读入自动补默认值
+- 方案、热键、统计、包记录、发送历史、targets、strategies 一字不改；三条升级路径回归继续跑
+- 旧版每个按钮/菜单在新版仍可达（原工具条 + 侧栏 + 命令面板三通道）
+- 三产物（onefile / onedir / console CLI）形态不变，各自 SHA256
+- 2.1 中英双语继续生效；日志/诊断/异常文本仍保留中文
+
+### 验收标准与实测（`docs/PLAN-2.2.md` §5，测试即契约）
+
+| 类别 | 标准 | 实测 |
+|---|---|---|
+| 视觉 V1 | 除 `theme.py` 外新 UI 模块零硬编码颜色 | AST 扫描通过 |
+| 视觉 V2 | 正文/背景对比度 ≥4.5:1（WCAG AA），双主题 | 浅色最低 **5.26:1**，深色最低 **6.81:1** |
+| 视觉 V3/V4/V5 | 双主题令牌键一致、密度线性、100/125/150% 三档构建 | 全部通过 |
+| 交互 I1 | 命令面板输入→结果 <50ms | 200 条命令搜索 P95 **0.1ms** |
+| 交互 I2 | `Ctrl+K`→输入→↑↓→Enter→Esc 全键盘 | 事件模拟通过 |
+| 交互 I3 | 主题切换 <200ms 且不重建控件树 | **6.4ms**，`self.tree` 对象身份不变 |
+| 交互 I4/I5 | UI 层无阻塞调用；两种模式业务方法可调 | AST + 双模式冒烟通过 |
+| 响应 R1 | 主窗口构建 <1.5s | nova **79.3ms** / classic **57.3ms** |
+| 响应 R2 | 1000 条渲染 <300ms | **10.3ms** |
+| 响应 R3 | 200 条命令过滤 <20ms | **0.1ms** |
+| 回归 | 228 条单测、ruff 0、selftest、0 次 access violation | 全绿 |
+
+> CI 上性能断言取规格值 3 倍余量避免机器波动；上表是本机实测值。观感类（窄窗口折叠、三档缩放截图）仍需人工复核。
+
+### 启动参数
+
+```bat
+VC-Cheat-Typer.exe --classic-ui      :: 回退旧布局（本次生效，不改配置）
+VC-Cheat-Typer.exe --nova-ui         :: 强制新布局
+:: 设置 → 常规 → 界面（Nova UI）可持久化切换布局/主题/密度
+```
+
+### 模块结构更新
+
+```
+vcct/
+├── core/          零 GUI 公共 API（2.0，未改动）
+├── ui/            ★ 2.2 新增：自研 UI 基础设施
+│   ├── theme.py       设计令牌 / 双主题 / 对比度
+│   ├── components.py  声明式组件
+│   ├── shell.py       NovaShell 骨架
+│   └── commands.py    命令注册表 + Ctrl+K 面板
+├── paths.py / i18n.py / cli.py / tray.py / ... （2.0~2.1，未改动）
+└── const.py / winapi.py / sender.py / hotkeys.py / store.py / packs.py ...
+vc_cheat_typer.py   UI 壳：只新增「主题注入 + 外壳挂载 + Ctrl+K 绑定 + 设置项」
+```
 
 ## v2.1 更新内容（收尾 P1 + 兑现工程承诺）
 
@@ -364,6 +448,7 @@ vc-cheats/
 ├── vc_cheat_typer.py  主程序入口（GUI + 自检 + 诊断；逻辑在 vcct/）
 ├── vcct/              核心模块（const/winapi/hotkeys/store/sender/loggingx/tray/packs/importer/templates）
 ├── vcct/core/         2.0 通用输入平台（门面 + targets/strategy/hooks，零 tkinter）
+├── vcct/ui/           2.2 Nova UI（theme/components/shell/commands，零第三方依赖）
 ├── vcct/paths.py      2.1 数据目录（portable / userdata）
 ├── vcct/i18n.py       2.1 中英表驱动文案
 ├── vcct/cli.py        2.0 命令行入口
@@ -379,7 +464,7 @@ vc-cheats/
 ├── logs/app.log       运行日志与崩溃堆栈（1MB 滚动，保留 3 份）
 ├── docs/ROADMAP-1.6.md   1.6 版本规划（已发布）
 ├── docs/ROADMAP-1.7-2.0.md  1.7 → 2.0 路线规划
-├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md / PLAN-2.1.md  各版执行方案
+├── docs/PLAN-1.7.md / PLAN-1.8.md / PLAN-1.9.md / PLAN-1.9.1.md / PLAN-2.0.md / PLAN-2.1.md / PLAN-2.2.md  各版执行方案
 ├── docs/PACK-FORMAT.md   .vcpack 秘籍包格式规范
 ├── docs/MIGRATION.md    配置迁移 / 备份 / 回退说明
 ├── docs/site/           离线文档站（tools/build_docs.py 生成）
