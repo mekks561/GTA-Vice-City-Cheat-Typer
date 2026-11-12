@@ -46,6 +46,7 @@ import time
 import tkinter as tk
 import uuid
 import zipfile
+from collections import deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # --- 1.7 兼容层：实现已搬入 vcct/，此处按名导入以保持既有调用与测试不变 ---
@@ -211,6 +212,22 @@ _cli_ui_mode: str | None = None
 
 # P0：faulthandler 的目标文件必须常驻，否则句柄被回收后崩溃栈无处可写
 _faulthandler_file = None
+
+
+# 运行时环形缓冲：进程内所有 send 事件（成功/失败/取消），供 diagnose_report 与 --export-diag 使用。
+# 用 deque(maxlen=50) 硬上限，永不写盘、永不进 store，只在导出诊断包时序列化。
+_SEND_EVENTS: deque[dict] = deque(maxlen=50)
+
+
+def record_send_event(kind: str, code: str, **extra) -> None:
+    """模块级事件钩子：_send_worker 各分支统一调用，不依赖 CheatApp 实例。
+
+    kind: ok / fail / cancel / skip
+    extra: sent, total, elapsed, reason, detail 等
+    """
+    entry = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "ts_epoch": round(time.time(), 3), "kind": kind, "code": code}
+    entry.update(extra)
+    _SEND_EVENTS.append(entry)
 
 
 def _shade(color: str, factor: float) -> str:
@@ -3038,6 +3055,7 @@ class CheatApp:
                 self.events.put(("toast", "⚠ 权限不匹配：请以管理员身份重启工具", "warn"))
                 append_log(f"SEND fail code={code} reason=uipi_blocked game_admin=1 self_admin=0", "WARN")
                 history("fail", "权限不匹配（UIPI 静默拦截）")
+                record_send_event("fail", code, reason="uipi_blocked")
                 return
 
             if check_fg and not self._fg_ok(params["keywords"]):
@@ -3051,6 +3069,7 @@ class CheatApp:
                 self.events.put(("toast", f"⚠ 未在前台：{title or '未知窗口'}", "warn"))
                 append_log(f"SEND fail code={code} reason=not_foreground title={title!r}", "WARN")
                 history("fail", f"前台不匹配（当前 {title or '未知'}）")
+                record_send_event("fail", code, reason="not_foreground", title=title or "")
                 return
 
             target_hwnd = user32.GetForegroundWindow() or 0
@@ -3059,6 +3078,7 @@ class CheatApp:
             if not self.hooks.fire_before({"hwnd": target_hwnd}, cheat):
                 self.log("⏹ 前置钩子否决了本次发送。", "warn", from_thread=True)
                 history("fail", "前置钩子否决")
+                record_send_event("skip", code, reason="hook_veto")
                 return
 
             if params["release_mods"]:
@@ -3097,25 +3117,30 @@ class CheatApp:
             self.events.put(("toast", f"✔ {name} · {code}", "ok"))
             self.events.put(("stats", cid, code))
             history("ok", f"已发 {sent}/{total} 字符")
+            record_send_event("ok", code, sent=sent, total=total, elapsed=round(elapsed, 3))
         except SendCancelled as exc:
             elapsed = time.perf_counter() - t0
             self.log(f"⏹ 已停止「{name}」：发到第 {exc.sent}/{exc.total} 个字符。", "warn", from_thread=True)
             self.events.put(("toast", f"⏹ 已停止 {exc.sent}/{exc.total}", "warn"))
             append_log(f"SEND cancel code={code} sent={exc.sent}/{exc.total} elapsed={elapsed:.3f}s", "WARN")
             history("cancel", f"停在第 {exc.sent}/{exc.total} 字符")
+            record_send_event("cancel", code, sent=exc.sent, total=exc.total, elapsed=round(elapsed, 3))
         except SendError as exc:
             self.log(f"⚠ {exc.reason}（已发 {exc.sent}/{exc.total}）", "warn", from_thread=True)
             self.events.put(("toast", f"⚠ {exc.reason}", "warn"))
             append_log(f"SEND fail code={code} reason={exc.reason} sent={exc.sent}/{exc.total}", "WARN")
             history("fail", f"{exc.reason}（已发 {exc.sent}/{exc.total}）")
+            record_send_event("fail", code, reason=exc.reason, sent=exc.sent, total=exc.total)
         except OSError as exc:
             self.log(f"✖ 键盘注入失败：{exc}（若游戏以管理员运行，请同样以管理员运行本工具）", "warn", from_thread=True)
             append_log(f"SEND fail code={code} reason=oserror {exc}", "WARN")
             history("fail", f"键盘注入失败：{exc}")
+            record_send_event("fail", code, reason="oserror", detail=str(exc))
         except Exception as exc:
             self.log(f"✖ 发送异常：{exc}", "warn", from_thread=True)
             append_log(f"SEND fail code={code} reason=exception {exc}", "WARN")
             history("fail", str(exc))
+            record_send_event("fail", code, reason="exception", detail=str(exc))
         finally:
             self.events.put(("send_done", cid))
             self.sending.release()
@@ -4163,6 +4188,33 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
             add("探针结果", f"取得前台={got_fg}　收到={got!r}（期望 'VCCT' 或不区分大小写）")
         except Exception as exc:
             add("探针结果", f"失败：{exc}")
+
+    # 运行时 send 事件（环形缓冲最近 50 条，诊断报告只展示最近 10 条关键摘要）
+    events = list(_SEND_EVENTS)
+    if events:
+        ok = sum(1 for e in events if e.get("kind") == "ok")
+        fail = sum(1 for e in events if e.get("kind") == "fail")
+        cancel = sum(1 for e in events if e.get("kind") == "cancel")
+        out.append("")
+        out.append(f"Send 事件（进程内最近 {len(events)} 条，成功 {ok} / 失败 {fail} / 取消 {cancel}）：")
+        for e in events[-10:]:
+            kind = e.get("kind", "?")
+            tag = {"ok": "✔", "fail": "✖", "cancel": "⏹", "skip": "⏭"}.get(kind, "·")
+            code = e.get("code", "?")
+            extra = []
+            if kind == "ok":
+                extra.append(f"{e.get('sent', '?')}/{e.get('total', '?')}")
+                if "elapsed" in e:
+                    extra.append(f"{e['elapsed']}s")
+            else:
+                if "reason" in e:
+                    extra.append(str(e["reason"]))
+                if "detail" in e and e["detail"] != e.get("reason"):
+                    extra.append(str(e["detail"])[:60])
+            out.append(f"  {tag} {e.get('ts', '')}  {code:<24} {' '.join(extra)}")
+    else:
+        out.append("")
+        out.append("Send 事件：进程启动后尚未发送过任何秘籍。")
     return out
 
 
@@ -4182,13 +4234,14 @@ def _redact(text: str) -> str:
 
 
 def export_diagnostics(out_path: str | None = None) -> str:
-    """P0：导出脱敏诊断包（环境报告 + 日志 + 配置），供问题反馈。"""
+    """P0：导出脱敏诊断包（环境报告 + 日志 + 配置 + 近期 send 事件），供问题反馈。"""
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out_path = out_path or os.path.join(os.getcwd(), f"vcct-diag-{stamp}.zip")
     report = _redact("\n".join(diagnose_report(include_probe=False)))
     sources = ((log_file(), "logs/app.log"), (data_path(), "cheats.json"))
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("diagnose.txt", report)
+        zf.writestr("send_history.json", json.dumps(list(_SEND_EVENTS), ensure_ascii=False, indent=2))
         for src, arc in sources:
             try:
                 if os.path.isfile(src):

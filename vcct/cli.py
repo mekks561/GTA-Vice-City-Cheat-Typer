@@ -100,6 +100,18 @@ def cmd_pack_info(args) -> int:
     return 0
 
 
+def cmd_diagnose(args) -> int:
+    """CLI 一键体检：打印 diagnose_report（环境 / 权限 / 前台 / 注入探测 / send 历史）。"""
+    try:
+        from ..vc_cheat_typer import diagnose_report
+    except ImportError:
+        # 作为顶层模块执行时（python vcct/cli.py diagnose），用绝对导入
+        from vc_cheat_typer import diagnose_report  # type: ignore
+    probe = not getattr(args, "no_probe", False)
+    print("\n".join(diagnose_report(include_probe=probe)))
+    return 0
+
+
 def cmd_pack_validate(args) -> int:
     """严格校验：格式 / 条目 / 校验和。exit 0 = 干净；1 = 不可用；2 = 有警告但仍可用。"""
     with open(args.file, "r", encoding="utf-8") as fh:
@@ -266,6 +278,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_list)
     sub.add_parser("targets", help="列出目标规则").set_defaults(func=cmd_targets)
     sub.add_parser("strategies", help="列出具名发送策略").set_defaults(func=cmd_strategies)
+    d = sub.add_parser("diagnose", help="一键体检（环境 / 权限 / 前台 / send 历史）")
+    d.add_argument("--no-probe", action="store_true", help="跳过注入探针（探针会抢前台约 1 秒）")
+    d.set_defaults(func=cmd_diagnose)
     pk = sub.add_parser("pack", help="秘籍包")
     pk_sub = pk.add_subparsers(dest="pack_command", required=True)
     inf = pk_sub.add_parser("info", help="查看包信息")
