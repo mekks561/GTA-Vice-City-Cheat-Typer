@@ -4,6 +4,7 @@
 性能阈值在 CI 上取规格值的 3 倍余量，避免机器波动误报；
 本机实测值写入 BENCH 并在类结束时打印，供人工复核。
 """
+
 from __future__ import annotations
 
 import ast
@@ -36,18 +37,15 @@ class TestVisualConsistency(unittest.TestCase):
             with open(os.path.join(UI_DIR, name), "r", encoding="utf-8") as fh:
                 src = fh.read()
             # 注释里说明"不得出现颜色字面量"是允许的，只检查代码行
-            code_lines = [ln for ln in src.splitlines()
-                          if not ln.lstrip().startswith("#") and '"""' not in ln]
-            self.assertFalse([ln for ln in code_lines if HEX.search(ln)],
-                             f"{name} 不得硬编码颜色，必须走设计令牌")
+            code_lines = [ln for ln in src.splitlines() if not ln.lstrip().startswith("#") and '"""' not in ln]
+            self.assertFalse([ln for ln in code_lines if HEX.search(ln)], f"{name} 不得硬编码颜色，必须走设计令牌")
 
     def test_v2_wcag_contrast_both_themes(self):
         for theme in ui.THEMES:
             with self.subTest(theme=theme):
                 result = ui.check_contrast(ui.PALETTES[theme])
                 for name, item in result.items():
-                    self.assertGreaterEqual(item["ratio"], 4.5,
-                                            f"{theme}/{name} 对比度 {item['ratio']} < 4.5")
+                    self.assertGreaterEqual(item["ratio"], 4.5, f"{theme}/{name} 对比度 {item['ratio']} < 4.5")
                     self.assertTrue(item["pass"])
 
     def test_v3_palette_keys_identical(self):
@@ -71,14 +69,11 @@ class TestVisualConsistency(unittest.TestCase):
             for scale in (1.0, 1.25, 1.5):
                 with self.subTest(scale=scale):
                     tk_tokens = ui.tokens("light", "compact" if scale > 1.0 else "comfortable")
-                    shell = ui.NovaShell(root, None, tk_tokens,
-                                         ui.default_commands(None),
-                                         lambda: None, lambda: None, "Nova")
+                    shell = ui.NovaShell(root, None, tk_tokens, ui.default_commands(None), lambda: None, lambda: None, "Nova")
                     self.assertIsNotNone(shell.content_host)
                     self.assertEqual(len(shell.pills), len(ui.STATUS_KEYS))
                     root.update_idletasks()
-                    self.assertGreater(shell.status_bar.winfo_height(), 0,
-                                       "状态中心不能被内容区挤成 0 高")
+                    self.assertGreater(shell.status_bar.winfo_height(), 0, "状态中心不能被内容区挤成 0 高")
                     for child in list(root.winfo_children()):
                         child.destroy()
         finally:
@@ -100,17 +95,17 @@ class TestVisualConsistency(unittest.TestCase):
 class TestCommandRegistry(unittest.TestCase):
     def test_covers_all_existing_actions(self):
         import vc_cheat_typer as app_module
+
         reg = ui.default_commands(None)
         self.assertGreaterEqual(len(reg), 20)
-        missing = [c.action_name for c in reg.all()
-                   if not callable(getattr(app_module.CheatApp, c.action_name, None))]
+        missing = [c.action_name for c in reg.all() if not callable(getattr(app_module.CheatApp, c.action_name, None))]
         self.assertEqual(missing, [], "命令必须绑定到已存在的业务方法")
 
     def test_fuzzy_search(self):
         reg = ui.default_commands(None)
         self.assertTrue(reg.search("设置"))
         self.assertTrue(reg.search("hist"))
-        self.assertTrue(reg.search("htov"))       # 子序列模糊匹配
+        self.assertTrue(reg.search("htov"))  # 子序列模糊匹配
         self.assertEqual(reg.search("设置")[0].id, "data.settings")
 
     def test_execute_calls_existing_method(self):
@@ -147,6 +142,7 @@ class TestInteractionAndPerformance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import vc_cheat_typer as app_module
+
         cls.mod = app_module
         cls.old_load, cls.old_save = app_module.load_store, app_module.save_store
         app_module.save_store = lambda *a, **k: None
@@ -176,7 +172,7 @@ class TestInteractionAndPerformance(unittest.TestCase):
         except Exception:
             pass
         try:
-            root.update()          # 冲刷 ttk 挂起事件，避免销毁后收到 ThemeChanged
+            root.update()  # 冲刷 ttk 挂起事件，避免销毁后收到 ThemeChanged
             root.destroy()
         except Exception:
             pass
@@ -199,6 +195,36 @@ class TestInteractionAndPerformance(unittest.TestCase):
                     app.refresh_tree()
                 finally:
                     self._close(root, app)
+
+    def test_nova_hotkey_pill_reflects_conflicts(self):
+        """Nova 外壳 hotkeys pill 必须随注册结果变色。
+
+        内容区（行级 conflict tag / lbl_state / 热键总览页）两种模式共用，
+        唯独外壳 pill 是 Nova 独有，_on_hotkeys_applied 必须显式同步。
+        """
+        root, app, _ = self._make_app("nova")
+        try:
+            pill = app.shell._pill_by_key["hotkeys"]
+            cid = app.cheats[0]["id"]
+            occupied = self.mod.ERROR_HOTKEY_ALREADY_REGISTERED
+
+            app.conflicts.clear()
+            app._on_hotkeys_applied({cid: (False, occupied)}, {})
+            self.assertIn("⚠", pill.cget("text"))
+            self.assertEqual(pill.cget("bg"), app.ui_tokens["status_warn"])
+
+            app.conflicts.clear()
+            app._on_hotkeys_applied({cid: (True, 0)}, {})
+            self.assertIn("✔", pill.cget("text"))
+            self.assertEqual(pill.cget("bg"), app.ui_tokens["status_ok"])
+
+            app.toggle_pause()
+            app.conflicts.clear()
+            app._on_hotkeys_applied({}, {})
+            self.assertIn("⏸", pill.cget("text"))
+            self.assertEqual(pill.cget("bg"), app.ui_tokens["status_idle"])
+        finally:
+            self._close(root, app)
 
     def test_i3_theme_switch_does_not_rebuild_widgets(self):
         root, app, _ = self._make_app("nova")
@@ -242,10 +268,19 @@ class TestInteractionAndPerformance(unittest.TestCase):
         root, app, _ = self._make_app("nova")
         try:
             app.cheats[:] = [
-                {"id": f"x{i}", "name": f"秘籍{i}", "code": f"CODE{i:04d}",
-                 "hotkey": "", "group": "测试", "note": "", "interval_ms": 0,
-                 "verified": True, "enabled": True}
-                for i in range(1000)]
+                {
+                    "id": f"x{i}",
+                    "name": f"秘籍{i}",
+                    "code": f"CODE{i:04d}",
+                    "hotkey": "",
+                    "group": "测试",
+                    "note": "",
+                    "interval_ms": 0,
+                    "verified": True,
+                    "enabled": True,
+                }
+                for i in range(1000)
+            ]
             t0 = time.perf_counter()
             app.refresh_tree()
             elapsed = (time.perf_counter() - t0) * 1000
@@ -268,8 +303,7 @@ class TestCompatibility(unittest.TestCase):
     def test_old_config_gets_nova_defaults(self):
         for version in (1, 2, 3):
             with self.subTest(version=version):
-                raw = {"version": version, "profiles": [{"name": "默认",
-                                                          "cheats": [{"code": "AAA"}]}]}
+                raw = {"version": version, "profiles": [{"name": "默认", "cheats": [{"code": "AAA"}]}]}
                 out = normalize_store(raw)
                 self.assertEqual(out["settings"]["ui_mode"], "nova")
                 self.assertEqual(out["version"], 3)
@@ -287,9 +321,21 @@ class TestCompatibility(unittest.TestCase):
     def test_no_new_store_fields(self):
         """本版不得改动持久化字段集合（除可选 settings 键）。"""
         keys = set(default_store().keys())
-        expected = {"app", "version", "settings", "active_profile", "profiles",
-                    "stats", "today", "games", "packs", "ui", "history",
-                    "targets", "strategies"}
+        expected = {
+            "app",
+            "version",
+            "settings",
+            "active_profile",
+            "profiles",
+            "stats",
+            "today",
+            "games",
+            "packs",
+            "ui",
+            "history",
+            "targets",
+            "strategies",
+        }
         self.assertEqual(keys, expected)
 
     def test_version_aligned(self):

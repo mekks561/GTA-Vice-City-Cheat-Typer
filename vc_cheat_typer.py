@@ -2769,6 +2769,15 @@ class CheatApp:
             self.lbl_state.configure(text=t(f"✔ {ok_count} 个快捷键全部生效"))
             self.log(f"快捷键注册完成，共 {ok_count} 个生效。", "ok")
 
+        # Nova 外壳状态灯：内容区两种模式共用，但 hotkeys pill 只有 Nova 有，
+        # 必须在这里同步，否则冲突时外壳始终显示初始的「热键 ●」。
+        if self.paused:
+            self._nova_status("hotkeys", "热键 ⏸ 已暂停", "warn" if PAUSE_ID in self.conflicts else "idle")
+        elif cheat_conflicts or PAUSE_ID in self.conflicts:
+            self._nova_status("hotkeys", f"热键 ⚠ {len(cheat_conflicts)} 冲突 / {ok_count} 生效", "warn")
+        else:
+            self._nova_status("hotkeys", f"热键 ✔ {ok_count} 个生效", "ok")
+
         # 自动分配后仍有键被系统占着 → 换下一批候选键，最多 2 轮（避免死循环）
         fix, self._auto_fix = self._auto_fix, None
         if fix and fix["round"] < 2 and occupied_ids:
