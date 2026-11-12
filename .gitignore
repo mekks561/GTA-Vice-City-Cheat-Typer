@@ -17,6 +17,9 @@ cheats.v2.bak.json
 cheats.v2.json
 *.vcpack
 logs/
+# --export-diag 生成的临时诊断包
+vcct-diag-*.zip
+dist/*.sha256.txt
 
 # 构建产物
 build/
