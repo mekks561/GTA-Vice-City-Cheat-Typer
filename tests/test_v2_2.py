@@ -226,6 +226,20 @@ class TestInteractionAndPerformance(unittest.TestCase):
         finally:
             self._close(root, app)
 
+    def test_nova_hotkey_pill_opens_overview(self):
+        root, app, _ = self._make_app("nova")
+        try:
+            opened = []
+            app.open_hotkey_overview = lambda: opened.append(True)
+            pill = app.shell._pill_by_key["hotkeys"]
+            self.assertEqual(pill.cget("cursor"), "hand2")
+            root.update()
+            pill.event_generate("<Button-1>", x=2, y=2)
+            root.update()
+            self.assertEqual(opened, [True])
+        finally:
+            self._close(root, app)
+
     def test_i3_theme_switch_does_not_rebuild_widgets(self):
         root, app, _ = self._make_app("nova")
         try:

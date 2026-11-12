@@ -40,6 +40,9 @@ class NovaShell:
         self.status_bar.pack(fill="x", side="bottom")
         self._remember(self.status_bar, "bg", "bg")
         self._pill_by_key = dict(zip(STATUS_KEYS, self.pills.values()))
+        hotkey_pill = self._pill_by_key["hotkeys"]
+        hotkey_pill.configure(cursor="hand2")
+        hotkey_pill.bind("<Button-1>", lambda _event: self._open_hotkeys())
 
         self.top = ui.top_bar(root, tk_tokens, on_command_panel, on_theme, title)
         self.top.pack(fill="x", side="top")
@@ -101,6 +104,11 @@ class NovaShell:
             pill.configure(text=text, bg=self.tk_tokens[bg], fg=self.tk_tokens[fg])
         except Exception:
             pass
+
+    def _open_hotkeys(self):
+        callback = getattr(self.app, "open_hotkey_overview", None)
+        if callable(callback):
+            callback()
 
     def _nav(self, cmd_id: str):
         cmd = next((c for c in self.registry.all() if c.id == cmd_id), None)
