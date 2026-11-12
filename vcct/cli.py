@@ -23,7 +23,7 @@ import time
 
 from .const import APP_NAME, APP_VER, STORE_VERSION
 from .core.strategy import describe_plan, normalize_strategies, normalize_strategy, plan_send, resolve_strategy
-from .core.targets import evaluate_targets
+from .core.targets import evaluate_targets, normalize_targets
 from .packs import auto_avoid_hotkeys, diff_pack, merge_pack, pack_record, validate_pack
 from .store import export_v2, load_store, save_store
 
@@ -31,6 +31,28 @@ from .store import export_v2, load_store, save_store
 _STRAT_FORMAT = "vcct-strategies"
 _STRAT_VERSION = 1
 _STRAT_LIMIT_IMPORT = 100  # 导入时上限比 store 默认的 20 宽松，避免策略迁移时被截断
+
+# 目标规则文件格式（独立 JSON，与 pack/strategies 风格一致）
+_TARGET_FORMAT = "vcct-targets"
+_TARGET_VERSION = 1
+
+
+def _load_targets_file(path: str) -> tuple[list | None, str]:
+    """加载并初步校验 targets 文件；返回 (normalized_list 或 None, error_msg)。"""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"文件无法读取或不是合法 JSON：{exc}"
+    if not isinstance(raw, dict):
+        return None, "顶层不是 JSON 对象"
+    fmt = raw.get("format")
+    if fmt != _TARGET_FORMAT:
+        return None, f"格式标记不对：format={fmt!r}，期望 {_TARGET_FORMAT!r}"
+    rules = raw.get("targets")
+    if not isinstance(rules, list) or not rules:
+        return None, "targets 字段缺失、不是数组或为空"
+    return normalize_targets(rules), ""
 
 
 def _load_strat_file(path: str) -> tuple[dict | None, str]:
@@ -83,6 +105,7 @@ def cmd_list(args) -> int:
 
 
 def cmd_targets(_args) -> int:
+    """list：目标规则速览（无子命令时 fallback 到这个）。"""
     targets = _store().get("targets") or []
     if not targets:
         print("未配置 targets（可在 cheats.json 里添加；旧 games 规则仍照常生效）。")
@@ -95,6 +118,55 @@ def cmd_targets(_args) -> int:
             f"  → 方案={t.get('profile_ref') or '沿用'} 策略={t.get('strategy_ref') or '沿用'}"
             f"  IME={t.get('ime_policy')} 前台={t.get('require_foreground')}"
         )
+    return 0
+
+
+def cmd_targets_export(args) -> int:
+    targets = _store().get("targets") or []
+    out = {"format": _TARGET_FORMAT, "version": _TARGET_VERSION, "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"), "targets": targets}
+    path = getattr(args, "file", None) or "targets.json"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=2)
+    print(f"✔ 已导出 {len(targets)} 条目标规则到 {path}")
+    return 0
+
+
+def cmd_targets_validate(args) -> int:
+    rules, err = _load_targets_file(args.file)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    print(f"✔ 目标规则文件通过：{len(rules)} 条合法规则")
+    return 0
+
+
+def cmd_targets_import(args) -> int:
+    rules, err = _load_targets_file(args.file)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    if not rules:
+        print("✖ 文件里没有任何合法目标规则。")
+        return 1
+
+    store = _store()
+    if getattr(args, "replace", False):
+        existing = store.get("targets") or []
+        mode_note = f"替换模式：原有 {len(existing)} 条规则全部丢弃"
+        merged = rules
+    else:
+        existing = store.get("targets") or []
+        merged = list(existing) + rules
+        mode_note = f"合并模式：原有 {len(existing)} + 新增 {len(rules)} = 目标 {len(merged)}"
+
+    print(f"将要 {mode_note}")
+    if getattr(args, "dry_run", False):
+        print("（dry-run，未写盘）")
+        return 0
+
+    store["targets"] = merged
+    save_store(store)
+    print(f"✔ 目标规则已导入并保存（当前 store 共 {len(merged)} 条）")
     return 0
 
 
@@ -361,7 +433,23 @@ def build_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("list", help="列出秘籍")
     q.add_argument("--profile")
     q.set_defaults(func=cmd_list)
-    sub.add_parser("targets", help="列出目标规则").set_defaults(func=cmd_targets)
+    sub.add_parser("targets", help="列出目标规则（等同 `target list`）").set_defaults(func=cmd_targets)
+    # 2.0 目标规则文件操作（独立 JSON，格式 vcct-targets v1）
+    tg = sub.add_parser("target", help="目标规则文件操作")
+    tg_sub = tg.add_subparsers(dest="target_command")
+    tg_ls = tg_sub.add_parser("list", help="本地 store 里的目标规则（等同 `targets`）")
+    tg_ls.set_defaults(func=cmd_targets)
+    tg_ex = tg_sub.add_parser("export", help="把本地 store 的目标规则导出成 JSON 文件")
+    tg_ex.add_argument("file", nargs="?", help="输出路径（默认 targets.json）")
+    tg_ex.set_defaults(func=cmd_targets_export)
+    tg_vl = tg_sub.add_parser("validate", help="校验目标规则文件格式")
+    tg_vl.add_argument("file")
+    tg_vl.set_defaults(func=cmd_targets_validate)
+    tg_im = tg_sub.add_parser("import", help="导入目标规则文件进本地 store（默认合并）")
+    tg_im.add_argument("file")
+    tg_im.add_argument("--replace", action="store_true", help="替换模式：先清空现有规则再导入")
+    tg_im.add_argument("--dry-run", action="store_true", help="只打印不落盘")
+    tg_im.set_defaults(func=cmd_targets_import)
     sub.add_parser("strategies", help="列出具名发送策略（等同 `strategies list`）").set_defaults(func=cmd_strategies)
     # 2.0 具名策略文件操作（独立 JSON，格式 vcct-strategies v1）
     sg = sub.add_parser("strategy", help="具名策略文件操作")

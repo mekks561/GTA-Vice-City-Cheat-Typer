@@ -111,6 +111,9 @@ VSVersionInfo(
     }
 
     Write-Host "[3/3] PyInstaller + SHA256..." -ForegroundColor Gray
+    # 三个 .spec 已统一 upx=False；显式打一条让构建者一眼看到加固状态
+    # （UPX 常被杀软误报 / 破坏 Authenticode 签名 / 易被替换植入，禁用是默认安全选择）
+    Write-Host "    UPX : disabled (spec 里 upx=False；如需启用请改 spec 文件并自担杀软误报 / 签名破坏风险)" -ForegroundColor Yellow
     # PyInstaller calls os.remove on the old dist exe. Some managed environments
     # intercept that with a Recycle-Bin hook and fail, so move the old file aside
     # instead of deleting it.

@@ -27,6 +27,9 @@ from vcct.cli import (
     cmd_strategies_export,
     cmd_strategies_import,
     cmd_strategies_validate,
+    cmd_targets_export,
+    cmd_targets_import,
+    cmd_targets_validate,
     main,
 )
 from vcct.packs import make_pack
@@ -261,6 +264,133 @@ class TestStrategiesCli(unittest.TestCase):
                         file=path, replace=True, dry_run=False))
             self.assertEqual(code, 0)
             self.assertEqual(list(saved[0]["strategies"].keys()), ["新策略"])
+        finally:
+            os.unlink(path)
+
+
+class TestTargetsCli(unittest.TestCase):
+    """目标规则 export / validate / import 三命令回归。"""
+
+    def _fake_store(self, targets=None):
+        return {
+            "active_profile": "默认",
+            "profiles": [{"name": "默认", "cheats": []}],
+            "settings": {},
+            "strategies": {},
+            "targets": targets or [],
+        }
+
+    def _make_targets_file(self, path, targets):
+        doc = {
+            "format": "vcct-targets",
+            "version": 1,
+            "targets": targets,
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+
+    def test_export_writes_format_header(self):
+        rules = [
+            {"name": "VC 进程", "match_type": "exe", "pattern": "gta-vc.exe", "enabled": True},
+            {"name": "窗口标题", "match_type": "title", "pattern": "Vice City"},
+        ]
+        fake = self._fake_store(targets=rules)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            out_path = f.name
+        try:
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                code = cmd_targets_export(_FakeArgs(file=out_path))
+            self.assertEqual(code, 0)
+            with open(out_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual(data["format"], "vcct-targets")
+            self.assertEqual(data["version"], 1)
+            self.assertEqual(len(data["targets"]), 2)
+            self.assertEqual(data["targets"][0]["name"], "VC 进程")
+        finally:
+            os.unlink(out_path)
+
+    def test_validate_good_file_exit_0(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_targets_file(path, [
+                {"name": "VC 进程", "match_type": "exe", "pattern": "gta-vc.exe"},
+            ])
+            code = cmd_targets_validate(_FakeArgs(file=path))
+            self.assertEqual(code, 0)
+        finally:
+            os.unlink(path)
+
+    def test_validate_bad_format_exit_1(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"format": "wrong-format", "targets": []}, fh)
+            code = cmd_targets_validate(_FakeArgs(file=path))
+            self.assertEqual(code, 1)
+        finally:
+            os.unlink(path)
+
+    def test_import_dry_run_does_not_save(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_targets_file(path, [
+                {"name": "新规则", "match_type": "exe", "pattern": "new.exe"},
+            ])
+            fake = self._fake_store(targets=[{"name": "已有", "match_type": "exe", "pattern": "old.exe"}])
+            save_mock = mock.Mock()
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", save_mock):
+                    code = cmd_targets_import(_FakeArgs(
+                        file=path, replace=False, dry_run=True))
+            self.assertEqual(code, 0)
+            save_mock.assert_not_called()
+        finally:
+            os.unlink(path)
+
+    def test_import_merge_append(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_targets_file(path, [
+                {"name": "新规则", "match_type": "exe", "pattern": "new.exe"},
+            ])
+            existing = [{"name": "已有", "match_type": "exe", "pattern": "old.exe"}]
+            fake = self._fake_store(targets=existing)
+            saved = []
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", lambda s: saved.append(s)):
+                    code = cmd_targets_import(_FakeArgs(
+                        file=path, replace=False, dry_run=False))
+            self.assertEqual(code, 0)
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(len(saved[0]["targets"]), 2)
+            self.assertEqual(saved[0]["targets"][0]["pattern"], "old.exe")
+            self.assertEqual(saved[0]["targets"][1]["pattern"], "new.exe")
+        finally:
+            os.unlink(path)
+
+    def test_import_replace_clears_existing(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_targets_file(path, [
+                {"name": "新规则", "match_type": "exe", "pattern": "new.exe"},
+            ])
+            existing = [{"name": "已有", "match_type": "exe", "pattern": "old.exe"}]
+            fake = self._fake_store(targets=existing)
+            saved = []
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", lambda s: saved.append(s)):
+                    code = cmd_targets_import(_FakeArgs(
+                        file=path, replace=True, dry_run=False))
+            self.assertEqual(code, 0)
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(len(saved[0]["targets"]), 1)
+            self.assertEqual(saved[0]["targets"][0]["pattern"], "new.exe")
         finally:
             os.unlink(path)
 
