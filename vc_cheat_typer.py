@@ -35,6 +35,7 @@ VC-Cheat-Typer — GTA: Vice City 秘籍一键输入器（Windows / 单文件 / 
 from __future__ import annotations
 
 import ctypes
+import faulthandler
 import json
 import os
 import queue
@@ -44,70 +45,181 @@ import threading
 import time
 import tkinter as tk
 import uuid
+import zipfile
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # --- 1.7 兼容层：实现已搬入 vcct/，此处按名导入以保持既有调用与测试不变 ---
 from vcct.const import (  # noqa: F401
-    APP_NAME, APP_VER, C, DEFAULT_GAME, DEFAULT_SETTINGS, IS_WIN, PAUSE_HID, PAUSE_ID,
-    PRESETS, STORE_APP, STORE_VERSION, WIN_H, WIN_W,
+    APP_NAME,
+    APP_VER,
+    C,
+    DEFAULT_GAME,
+    DEFAULT_SETTINGS,
+    IS_WIN,
+    PAUSE_HID,
+    PAUSE_ID,
+    PRESETS,
+    STORE_APP,
+    STORE_VERSION,
+    WIN_H,
+    WIN_W,
 )
 from vcct.winapi import (  # noqa: F401
-    ERROR_ACCESS_DENIED, ERROR_HOTKEY_ALREADY_REGISTERED, GA_ROOT, GWL_EXSTYLE, INPUT,
-    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MODIFIER_VKS, MOD_ALT, MOD_CONTROL,
-    MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_BY_NAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, ImeGuard, _key_item, _send, add_window_exstyle, enable_dpi_awareness,
-    find_game_window, force_foreground, foreground_info, get_window_exstyle, imm32,
-    is_key_down, kernel32, press_key, raw_char_probe, release_modifiers, send_key,
-    ui_scale, user32, vk_for_char,
+    ERROR_ACCESS_DENIED,
+    ERROR_HOTKEY_ALREADY_REGISTERED,
+    GA_ROOT,
+    GWL_EXSTYLE,
+    INPUT,
+    KEYEVENTF_KEYUP,
+    KEYEVENTF_SCANCODE,
+    MODIFIER_VKS,
+    MOD_ALT,
+    MOD_CONTROL,
+    MOD_NOREPEAT,
+    MOD_SHIFT,
+    MOD_WIN,
+    VK_BY_NAME,
+    WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST,
+    ImeGuard,
+    _key_item,
+    _send,
+    add_window_exstyle,
+    enable_dpi_awareness,
+    find_game_window,
+    force_foreground,
+    foreground_info,
+    get_window_exstyle,
+    imm32,
+    is_key_down,
+    kernel32,
+    press_key,
+    raw_char_probe,
+    release_modifiers,
+    send_key,
+    ui_scale,
+    user32,
+    vk_for_char,
 )
 from vcct.winapi import (  # noqa: F401
-    process_elevated, self_elevated, shell_execute_runas, window_pid,
+    process_elevated,
+    self_elevated,
+    shell_execute_runas,
+    window_pid,
 )
 from vcct.hotkeys import (  # noqa: F401
-    HotkeyEngine, build_bindings, candidate_combos, combo_signature, format_combo,
-    is_safe_binding, parse_combo, pick_free_combo,
+    HotkeyEngine,
+    build_bindings,
+    candidate_combos,
+    combo_signature,
+    format_combo,
+    is_safe_binding,
+    parse_combo,
+    pick_free_combo,
 )
 from vcct.store import (  # noqa: F401
-    _norm_cheat, _norm_history, _safe_int, bump_stats, bundle_payload, default_cheats, default_store,
-    evaluate_game_rules, export_v2, filter_cheats, last_load_warning, load_store,
-    migrate_store, normalize_store, parse_bundle, save_store, sorted_cheats, touch_today,
+    _norm_cheat,
+    _norm_history,
+    _safe_int,
+    bump_stats,
+    bundle_payload,
+    default_cheats,
+    default_store,
+    evaluate_game_rules,
+    export_v2,
+    filter_cheats,
+    last_load_warning,
+    load_store,
+    migrate_store,
+    normalize_store,
+    parse_bundle,
+    save_store,
+    sorted_cheats,
+    touch_today,
 )
 from vcct.packs import (  # noqa: F401
-    auto_avoid_hotkeys, compare_pack_record, diff_pack, make_pack, merge_pack,
-    pack_record, validate_pack,
+    auto_avoid_hotkeys,
+    compare_pack_record,
+    diff_pack,
+    make_pack,
+    merge_pack,
+    pack_record,
+    validate_pack,
 )
 from vcct.importer import parse_pasted  # noqa: F401
 from vcct.templates import (  # noqa: F401
-    TEMPLATE_INFO, TEMPLATE_NAMES, template_cheats, template_preset,
+    TEMPLATE_INFO,
+    TEMPLATE_NAMES,
+    template_cheats,
+    template_preset,
 )
+
 # 2.0：通用输入平台能力（纯逻辑，零 tkinter）
 from vcct.core.strategy import (  # noqa: F401
-    normalize_strategy, plan_send, resolve_strategy, should_retry,
+    normalize_strategy,
+    plan_send,
+    resolve_strategy,
+    should_retry,
 )
 from vcct.core.targets import (  # noqa: F401
-    evaluate_targets, normalize_targets, resolve_target, targets_from_games,
+    evaluate_targets,
+    normalize_targets,
+    resolve_target,
+    targets_from_games,
 )
 from vcct.core.hooks import HookBus  # noqa: F401
 from vcct.loggingx import (  # noqa: F401
-    append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
+    append_log,
+    backup_path,
+    data_path,
+    install_crash_hooks,
+    log_dir,
+    log_file,
 )
 from vcct.i18n import (  # noqa: F401
-    LOCALES, apply_locale_to_widgets, get_locale, set_locale, t,
+    LOCALES,
+    apply_locale_to_widgets,
+    get_locale,
+    set_locale,
+    t,
 )
+
 # 2.2 Nova UI：自研 UI 基础设施（令牌驱动 / 声明式 / 命令优先），零第三方依赖
 from vcct.ui import (  # noqa: F401
-    CommandPalette, NovaShell, apply_theme, check_contrast, default_commands,
+    CommandPalette,
+    NovaShell,
+    apply_theme,
+    check_contrast,
+    default_commands,
     tokens as ui_tokens,
 )
 from vcct.paths import (  # noqa: F401
-    copy_config_to, data_root, describe as describe_paths, other_mode,
-    read_data_mode, set_data_mode,
+    copy_config_to,
+    data_root,
+    describe as describe_paths,
+    other_mode,
+    read_data_mode,
+    set_data_mode,
 )
 from vcct.sender import SendCancelled, SendError, SendParams, type_text
+from vcct.schema import is_valid_code
 from vcct.tray import TrayIcon
 
 # 2.2：启动参数 --classic-ui / --nova-ui 只覆盖本次进程，不改配置
 _cli_ui_mode: str | None = None
+
+# P0：faulthandler 的目标文件必须常驻，否则句柄被回收后崩溃栈无处可写
+_faulthandler_file = None
+
+
+def _shade(color: str, factor: float) -> str:
+    """按比例调亮/调暗一个 #rrggbb 颜色（factor<1 变暗，>1 变亮）。"""
+    try:
+        rgb = [int(color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
+    except (ValueError, IndexError):
+        return color
+    return "#" + "".join(f"{min(255, max(0, round(v * factor))):02x}" for v in rgb)
 
 
 # ----------------------------------------------------------------------------
@@ -129,15 +241,19 @@ class HotkeyCapture(tk.Toplevel):
 
         wrap = tk.Frame(self, bg="#ffffff", padx=26, pady=20)
         wrap.pack(fill="both", expand=True)
-        tk.Label(wrap, text="请按下新的组合键", bg="#ffffff", fg="#1a1f29",
-                 font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
+        tk.Label(wrap, text="请按下新的组合键", bg="#ffffff", fg="#1a1f29", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
         self.var = tk.StringVar(value=current or "（当前未绑定）")
-        tk.Label(wrap, textvariable=self.var, bg="#eef4ff", fg="#1d4ed8",
-                 font=("Consolas", 15, "bold"), padx=14, pady=10).pack(fill="x", pady=(12, 10))
-        tk.Label(wrap, text="Esc 取消 · Backspace 清除绑定\n"
-                            "单字母/数字必须加 Ctrl 或 Alt 或 Shift，否则会吞掉正常按键",
-                 bg="#ffffff", fg="#6b7280", justify="left",
-                 font=("Microsoft YaHei UI", 9)).pack(anchor="w")
+        tk.Label(wrap, textvariable=self.var, bg="#eef4ff", fg="#1d4ed8", font=("Consolas", 15, "bold"), padx=14, pady=10).pack(
+            fill="x", pady=(12, 10)
+        )
+        tk.Label(
+            wrap,
+            text="Esc 取消 · Backspace 清除绑定\n单字母/数字必须加 Ctrl 或 Alt 或 Shift，否则会吞掉正常按键",
+            bg="#ffffff",
+            fg="#6b7280",
+            justify="left",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w")
 
         self.update_idletasks()
         w, h = 380, 210
@@ -240,12 +356,11 @@ class CheatDialog(tk.Toplevel):
         self.title("编辑秘籍" if cheat else "添加秘籍")
         self.resizable(False, False)
         self.transient(master)
-        bind_dialog_keys(self, self._on_cancel)      # 1.8-G
+        bind_dialog_keys(self, self._on_cancel)  # 1.8-G
         self.configure(bg="#f5f6f8")
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
-        body = tk.Frame(self, bg="#ffffff", padx=22, pady=18,
-                        highlightthickness=1, highlightbackground="#e3e7ee")
+        body = tk.Frame(self, bg="#ffffff", padx=22, pady=18, highlightthickness=1, highlightbackground="#e3e7ee")
         body.pack(fill="both", expand=True, padx=12, pady=12)
         body.columnconfigure(1, weight=1)
 
@@ -258,49 +373,50 @@ class CheatDialog(tk.Toplevel):
         rows = [
             ("名称", tk.Entry(body, textvariable=self.var_name, font=("Microsoft YaHei UI", 10))),
             ("秘籍代码", tk.Entry(body, textvariable=self.var_code, font=("Consolas", 12, "bold"))),
-            ("分组", ttk.Combobox(body, textvariable=self.var_group, values=self.GROUPS,
-                                 font=("Microsoft YaHei UI", 10))),
+            ("分组", ttk.Combobox(body, textvariable=self.var_group, values=self.GROUPS, font=("Microsoft YaHei UI", 10))),
             ("备注", tk.Entry(body, textvariable=self.var_note, font=("Microsoft YaHei UI", 10))),
         ]
         for i, (label, widget) in enumerate(rows):
-            tk.Label(body, text=label, bg="#ffffff", fg="#374151",
-                     font=("Microsoft YaHei UI", 10)).grid(row=i, column=0, sticky="w", pady=7, padx=(0, 12))
+            tk.Label(body, text=label, bg="#ffffff", fg="#374151", font=("Microsoft YaHei UI", 10)).grid(
+                row=i, column=0, sticky="w", pady=7, padx=(0, 12)
+            )
             widget.grid(row=i, column=1, sticky="ew", pady=7, ipady=3)
 
         # 快捷键行
         r = len(rows)
-        tk.Label(body, text="快捷键", bg="#ffffff", fg="#374151",
-                 font=("Microsoft YaHei UI", 10)).grid(row=r, column=0, sticky="w", pady=7, padx=(0, 12))
+        tk.Label(body, text="快捷键", bg="#ffffff", fg="#374151", font=("Microsoft YaHei UI", 10)).grid(
+            row=r, column=0, sticky="w", pady=7, padx=(0, 12)
+        )
         hk = tk.Frame(body, bg="#ffffff")
         hk.grid(row=r, column=1, sticky="ew", pady=7)
-        self.hot_entry = tk.Entry(hk, textvariable=self.var_hot, state="readonly",
-                                  font=("Consolas", 11), readonlybackground="#f9fafb")
+        self.hot_entry = tk.Entry(hk, textvariable=self.var_hot, state="readonly", font=("Consolas", 11), readonlybackground="#f9fafb")
         self.hot_entry.pack(side="left", fill="x", expand=True, ipady=3)
         ttk.Button(hk, text="捕获", width=7, command=self._capture).pack(side="left", padx=(8, 0))
         ttk.Button(hk, text="清除", width=7, command=self._clear_hot).pack(side="left", padx=(6, 0))
 
-        hint = tk.Label(body, text="代码只填字母/数字（区分大小写无关，游戏内不区分）。"
-                                   "例：ASPIRINE",
-                        bg="#ffffff", fg="#9aa3ae", font=("Microsoft YaHei UI", 9))
+        hint = tk.Label(
+            body,
+            text="代码只填字母/数字（区分大小写无关，游戏内不区分）。例：ASPIRINE",
+            bg="#ffffff",
+            fg="#9aa3ae",
+            font=("Microsoft YaHei UI", 9),
+        )
         hint.grid(row=r + 1, column=1, sticky="w")
 
         # 单条速度覆盖（1.6）：默认跟随全局，个别秘籍可单独放慢
         own = int(self.cheat.get("interval_ms") or 0)
         self.var_follow = tk.BooleanVar(value=own <= 0)
-        self.var_interval = tk.IntVar(
-            value=own or int((getattr(app, "settings", {}) or {}).get("char_interval_ms", 45)))
+        self.var_interval = tk.IntVar(value=own or int((getattr(app, "settings", {}) or {}).get("char_interval_ms", 45)))
         row_s = r + 2
-        tk.Label(body, text="发送间隔", bg="#ffffff", fg="#374151",
-                 font=("Microsoft YaHei UI", 10)).grid(row=row_s, column=0, sticky="w", pady=7, padx=(0, 12))
+        tk.Label(body, text="发送间隔", bg="#ffffff", fg="#374151", font=("Microsoft YaHei UI", 10)).grid(
+            row=row_s, column=0, sticky="w", pady=7, padx=(0, 12)
+        )
         spd = tk.Frame(body, bg="#ffffff")
         spd.grid(row=row_s, column=1, sticky="ew", pady=7)
-        self.spin_interval = ttk.Spinbox(spd, from_=20, to=300, increment=5, width=6,
-                                         textvariable=self.var_interval)
+        self.spin_interval = ttk.Spinbox(spd, from_=20, to=300, increment=5, width=6, textvariable=self.var_interval)
         self.spin_interval.pack(side="left")
-        tk.Label(spd, text="ms / 字", bg="#ffffff", fg="#6b7280",
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(6, 0))
-        ttk.Checkbutton(spd, text="跟随全局", variable=self.var_follow,
-                        command=self._sync_interval).pack(side="left", padx=(12, 0))
+        tk.Label(spd, text="ms / 字", bg="#ffffff", fg="#6b7280", font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(6, 0))
+        ttk.Checkbutton(spd, text="跟随全局", variable=self.var_follow, command=self._sync_interval).pack(side="left", padx=(12, 0))
         self._sync_interval()
 
         bar = tk.Frame(self, bg="#ffffff")
@@ -342,17 +458,13 @@ class CheatDialog(tk.Toplevel):
         if not name:
             messagebox.showwarning("缺少名称", "请给这条秘籍起个名字。", parent=self)
             return
-        if not re.fullmatch(r"[A-Z0-9]{2,40}", code):
-            messagebox.showwarning("代码不合法",
-                                   "秘籍代码只能是字母或数字（2~40 位），请检查是否含空格或符号。",
-                                   parent=self)
+        if not is_valid_code(code):
+            messagebox.showwarning("代码不合法", "秘籍代码只能是字母或数字（2~40 位），请检查是否含空格或符号。", parent=self)
             return
         if self.hotkey:
             parsed = parse_combo(self.hotkey)
             if parsed and not is_safe_binding(*parsed):
-                messagebox.showwarning("快捷键不安全",
-                                       "无修饰键的单键会拦截正常打字，请加 Ctrl/Alt/Shift 或改用 F1-F12。",
-                                       parent=self)
+                messagebox.showwarning("快捷键不安全", "无修饰键的单键会拦截正常打字，请加 Ctrl/Alt/Shift 或改用 F1-F12。", parent=self)
                 return
         interval = 0
         if not self.var_follow.get():
@@ -376,6 +488,10 @@ class CheatDialog(tk.Toplevel):
             "game": str(self.cheat.get("game") or ""),
             "source_pack": str(self.cheat.get("source_pack") or ""),
         }
+        # 2.0 策略覆盖：编辑名称/热键时不能把策略洗掉
+        for key in ("strategy", "strategy_ref"):
+            if self.cheat.get(key):
+                self.result[key] = self.cheat[key]
         self.destroy()
 
 
@@ -391,7 +507,7 @@ class GameRuleDialog(tk.Toplevel):
         self.title("编辑切换规则" if rule else "添加切换规则")
         self.resizable(False, False)
         self.transient(master)
-        bind_dialog_keys(self)                       # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
         self.configure(bg="#f5f6f8")
         self.grab_set()
 
@@ -407,26 +523,25 @@ class GameRuleDialog(tk.Toplevel):
 
         names = [p["name"] for p in app.store["profiles"]]
         rows = [
-            ("规则名称", tk.Entry(body, textvariable=self.var_name,
-                                  font=("Microsoft YaHei UI", 10))),
-            ("匹配方式", ttk.Combobox(body, textvariable=self.var_type, state="readonly",
-                                      values=["exe", "title"], width=10)),
+            ("规则名称", tk.Entry(body, textvariable=self.var_name, font=("Microsoft YaHei UI", 10))),
+            ("匹配方式", ttk.Combobox(body, textvariable=self.var_type, state="readonly", values=["exe", "title"], width=10)),
             ("匹配内容", tk.Entry(body, textvariable=self.var_pattern, font=("Consolas", 11))),
-            ("目标方案", ttk.Combobox(body, textvariable=self.var_profile, state="readonly",
-                                      values=names)),
+            ("目标方案", ttk.Combobox(body, textvariable=self.var_profile, state="readonly", values=names)),
         ]
         for i, (label, widget) in enumerate(rows):
-            tk.Label(body, text=label, bg="#ffffff", fg="#374151",
-                     font=("Microsoft YaHei UI", 10)).grid(row=i, column=0, sticky="w",
-                                                           pady=6, padx=(0, 12))
+            tk.Label(body, text=label, bg="#ffffff", fg="#374151", font=("Microsoft YaHei UI", 10)).grid(
+                row=i, column=0, sticky="w", pady=6, padx=(0, 12)
+            )
             widget.grid(row=i, column=1, sticky="ew", pady=6, ipady=3)
-        ttk.Checkbutton(body, text="启用这条规则", variable=self.var_enabled)\
-            .grid(row=len(rows), column=1, sticky="w", pady=(8, 0))
-        tk.Label(body, text="exe = 按进程名匹配（推荐，如 gta-vc）；\n"
-                            "title = 按窗口标题匹配（易误判浏览器标签，慎用）。",
-                 bg="#ffffff", fg="#6b7280", justify="left",
-                 font=("Microsoft YaHei UI", 9)).grid(row=len(rows) + 1, column=0,
-                                                      columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Checkbutton(body, text="启用这条规则", variable=self.var_enabled).grid(row=len(rows), column=1, sticky="w", pady=(8, 0))
+        tk.Label(
+            body,
+            text="exe = 按进程名匹配（推荐，如 gta-vc）；\ntitle = 按窗口标题匹配（易误判浏览器标签，慎用）。",
+            bg="#ffffff",
+            fg="#6b7280",
+            justify="left",
+            font=("Microsoft YaHei UI", 9),
+        ).grid(row=len(rows) + 1, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
         btns = tk.Frame(self, bg="#f5f6f8")
         btns.pack(fill="x", padx=12, pady=(0, 12))
@@ -464,7 +579,7 @@ class SettingsDialog(tk.Toplevel):
         self.title(f"设置 — {APP_NAME}")
         self.configure(bg=C["bg"])
         self.transient(master)
-        bind_dialog_keys(self, self._close)          # 1.8-G：Esc 关窗也要保存设置
+        bind_dialog_keys(self, self._close)  # 1.8-G：Esc 关窗也要保存设置
         self.geometry(f"{int(640 * app.ui)}x{int(500 * app.ui)}")
         self.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -487,37 +602,35 @@ class SettingsDialog(tk.Toplevel):
     # -- 常规 ---------------------------------------------------------------
     def _page_general(self, nb):
         frm = self._page(nb)
-        ttk.Checkbutton(frm, text="游戏内悬浮提示（发送结果显示在右下角，不抢焦点）",
-                        variable=self.app.var_toast,
-                        command=self.app._on_setting_change).pack(anchor="w", pady=4)
-        ttk.Checkbutton(frm, text="关闭窗口时最小化到托盘（取消勾选 = 关闭即退出）",
-                        variable=self.app.var_tray,
-                        command=self.app._on_setting_change).pack(anchor="w", pady=4)
-        ttk.Checkbutton(frm, text="按游戏自动切换方案（规则在「游戏」页配置）",
-                        variable=self.app.var_auto_switch,
-                        command=self.app._on_setting_change).pack(anchor="w", pady=4)
-        ttk.Checkbutton(frm, text="启用扩展点（前置/后置钩子，高级功能，默认关闭）",
-                        variable=self.app.var_hooks,
-                        command=self.app._on_setting_change).pack(anchor="w", pady=4)
+        ttk.Checkbutton(
+            frm, text="游戏内悬浮提示（发送结果显示在右下角，不抢焦点）", variable=self.app.var_toast, command=self.app._on_setting_change
+        ).pack(anchor="w", pady=4)
+        ttk.Checkbutton(
+            frm, text="关闭窗口时最小化到托盘（取消勾选 = 关闭即退出）", variable=self.app.var_tray, command=self.app._on_setting_change
+        ).pack(anchor="w", pady=4)
+        ttk.Checkbutton(
+            frm, text="按游戏自动切换方案（规则在「游戏」页配置）", variable=self.app.var_auto_switch, command=self.app._on_setting_change
+        ).pack(anchor="w", pady=4)
+        ttk.Checkbutton(
+            frm, text="启用扩展点（前置/后置钩子，高级功能，默认关闭）", variable=self.app.var_hooks, command=self.app._on_setting_change
+        ).pack(anchor="w", pady=4)
 
         box = ttk.LabelFrame(frm, text=" 全局暂停热键 ", padding=12)
         box.pack(fill="x", pady=(14, 0))
         row = ttk.Frame(box)
         row.pack(fill="x")
         self.var_pause = tk.StringVar(value=self.app.settings.get("pause_hotkey", ""))
-        tk.Entry(row, textvariable=self.var_pause, state="readonly", width=18,
-                 font=("Consolas", 11), readonlybackground="#f9fafb").pack(side="left", ipady=3)
+        tk.Entry(row, textvariable=self.var_pause, state="readonly", width=18, font=("Consolas", 11), readonlybackground="#f9fafb").pack(
+            side="left", ipady=3
+        )
         ttk.Button(row, text="捕获", width=7, command=self._capture_pause).pack(side="left", padx=(8, 0))
-        ttk.Label(box, text="在任何窗口按这个键可一键暂停/恢复全部秘籍热键。",
-                  style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(box, text="在任何窗口按这个键可一键暂停/恢复全部秘籍热键。", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         box2 = ttk.LabelFrame(frm, text=" 维护 ", padding=12)
         box2.pack(fill="x", pady=(14, 0))
-        ttk.Button(box2, text="重新运行首次启动向导", command=self.app.open_wizard)\
-            .pack(side="left", padx=(0, 8))
+        ttk.Button(box2, text="重新运行首次启动向导", command=self.app.open_wizard).pack(side="left", padx=(0, 8))
         ttk.Button(box2, text="环境诊断", command=self.app.run_diagnose).pack(side="left")
-        ttk.Button(box2, text="以管理员身份重启", command=self.app.relaunch_as_admin)\
-            .pack(side="left", padx=(8, 0))
+        ttk.Button(box2, text="以管理员身份重启", command=self.app.relaunch_as_admin).pack(side="left", padx=(8, 0))
 
         # 2.1 界面语言 / 更新入口
         box3 = ttk.LabelFrame(frm, text=" 界面与更新 ", padding=12)
@@ -526,37 +639,42 @@ class SettingsDialog(tk.Toplevel):
         lrow.pack(fill="x")
         ttk.Label(lrow, text="界面语言（重启后生效）").pack(side="left")
         self.var_locale = tk.StringVar(value="English" if get_locale() == "en" else "中文")
-        cbo = ttk.Combobox(lrow, textvariable=self.var_locale, state="readonly",
-                           values=["中文", "English"], width=12)
+        cbo = ttk.Combobox(lrow, textvariable=self.var_locale, state="readonly", values=["中文", "English"], width=12)
         cbo.pack(side="left", padx=(8, 0))
         cbo.bind("<<ComboboxSelected>>", self._change_locale)
         ttk.Button(lrow, text="立即重启", command=self.app.relaunch).pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(box3, text="显示更新入口（仅打开 Release 页，程序不联网、不自动下载；重启后生效）",
-                        variable=self.app.var_updates,
-                        command=self.app._on_setting_change).pack(anchor="w", pady=(8, 0))
+        ttk.Checkbutton(
+            box3,
+            text="显示更新入口（仅打开 Release 页，程序不联网、不自动下载；重启后生效）",
+            variable=self.app.var_updates,
+            command=self.app._on_setting_change,
+        ).pack(anchor="w", pady=(8, 0))
 
         # 2.2 Nova UI 设置
         box4 = ttk.LabelFrame(frm, text=" 界面（Nova UI） ", padding=12)
         box4.pack(fill="x", pady=(14, 0))
         s = self.app.settings
-        self.var_ui_mode = tk.StringVar(value="Nova（新版）" if s.get("ui_mode", "nova") == "nova"
-                                        else "经典（旧版，可回退）")
+        self.var_ui_mode = tk.StringVar(value="Nova（新版）" if s.get("ui_mode", "nova") == "nova" else "经典（旧版，可回退）")
         self.var_theme = tk.StringVar(value="深色" if s.get("theme") == "dark" else "浅色")
         self.var_density = tk.StringVar(value="紧凑" if s.get("density") == "compact" else "舒适")
-        for i, (label, var, values) in enumerate((
+        for i, (label, var, values) in enumerate(
+            (
                 ("布局", self.var_ui_mode, ["Nova（新版）", "经典（旧版，可回退）"]),
                 ("主题", self.var_theme, ["浅色", "深色"]),
-                ("密度", self.var_density, ["舒适", "紧凑"]))):
+                ("密度", self.var_density, ["舒适", "紧凑"]),
+            )
+        ):
             ttk.Label(box4, text=label).grid(row=i, column=0, sticky="w", pady=4, padx=(0, 12))
             cbo = ttk.Combobox(box4, textvariable=var, state="readonly", values=values, width=24)
             cbo.grid(row=i, column=1, sticky="w", pady=4)
             cbo.bind("<<ComboboxSelected>>", self._change_ui_setting)
-        ttk.Label(box4, text="切换布局 / 主题 / 密度后重启生效；顶栏也可即时切换深浅主题。"
-                  "\n经典布局 = 1.7～2.1 原界面与配色，随时可回退。",
-                  style="Muted.TLabel", justify="left").grid(
-                      row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Button(box4, text="立即重启", command=self.app.relaunch).grid(
-            row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(
+            box4,
+            text="切换布局 / 主题 / 密度后重启生效；顶栏也可即时切换深浅主题。\n经典布局 = 1.7～2.1 原界面与配色，随时可回退。",
+            style="Muted.TLabel",
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(box4, text="立即重启", command=self.app.relaunch).grid(row=4, column=0, sticky="w", pady=(8, 0))
         return frm
 
     def _change_ui_setting(self, *_):
@@ -565,18 +683,21 @@ class SettingsDialog(tk.Toplevel):
         s["theme"] = "dark" if self.var_theme.get() == "深色" else "light"
         s["density"] = "compact" if self.var_density.get() == "紧凑" else "comfortable"
         self.app.persist()
-        messagebox.showinfo("界面设置已保存",
-                            "布局 / 主题 / 密度将在下次启动生效。\n"
-                            "可点「立即重启」马上查看；深浅主题也可在 Nova 顶栏即时切换。",
-                            parent=self)
+        messagebox.showinfo(
+            "界面设置已保存",
+            "布局 / 主题 / 密度将在下次启动生效。\n可点「立即重启」马上查看；深浅主题也可在 Nova 顶栏即时切换。",
+            parent=self,
+        )
 
     def _change_locale(self, *_):
         code = "en" if self.var_locale.get() == "English" else "zh"
         self.app.settings["locale"] = code
         self.app.persist()
-        messagebox.showinfo("语言已保存",
-                            "界面语言将在下次启动生效。\n可点「立即重启」马上切换。"
-                            "\n\n日志、诊断报告与异常文本仍保留中文（便于排查）。", parent=self)
+        messagebox.showinfo(
+            "语言已保存",
+            "界面语言将在下次启动生效。\n可点「立即重启」马上切换。\n\n日志、诊断报告与异常文本仍保留中文（便于排查）。",
+            parent=self,
+        )
 
     def _capture_pause(self):
         HotkeyCapture(self, self.var_pause.get(), self._set_pause)
@@ -597,65 +718,74 @@ class SettingsDialog(tk.Toplevel):
         box.pack(fill="x")
         row = ttk.Frame(box)
         row.pack(fill="x")
-        tk.Label(row, text="窗口关键字（逗号分隔）", bg=C["panel"], fg=C["muted"],
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        tk.Label(row, text="窗口关键字（逗号分隔）", bg=C["panel"], fg=C["muted"], font=("Microsoft YaHei UI", 9)).pack(side="left")
         # FocusOut 必须绑在真正拿焦点的控件上：绑到容器 Frame 上永远不会触发，
         # 结果就是「改了关键字/间隔、没点别处就关窗」时设置不落盘（1.9.1 修）。
-        ent_kw = tk.Entry(row, textvariable=app.var_kw, width=26, relief="flat", bg="#f9fafb",
-                          highlightthickness=1, highlightbackground=C["line"],
-                          highlightcolor=C["accent"])
+        ent_kw = tk.Entry(
+            row,
+            textvariable=app.var_kw,
+            width=26,
+            relief="flat",
+            bg="#f9fafb",
+            highlightthickness=1,
+            highlightbackground=C["line"],
+            highlightcolor=C["accent"],
+        )
         ent_kw.pack(side="left", padx=(8, 8), ipady=3)
         ent_kw.bind("<FocusOut>", lambda e: app._on_setting_change())
         ent_kw.bind("<Return>", lambda e: app._on_setting_change())
         ttk.Button(row, text="拾取当前窗口", command=app.pick_window).pack(side="left")
-        ttk.Checkbutton(box, text="仅当目标窗口在前台时才发送（强烈建议开启）",
-                        variable=app.var_fg, command=app._on_setting_change)\
-            .pack(anchor="w", pady=(8, 0))
-        ttk.Checkbutton(box, text="发送时绕开中文输入法（中文 IME 会吞掉注入的字符）",
-                        variable=app.var_ime, command=app._on_setting_change)\
-            .pack(anchor="w", pady=2)
+        ttk.Checkbutton(box, text="仅当目标窗口在前台时才发送（强烈建议开启）", variable=app.var_fg, command=app._on_setting_change).pack(
+            anchor="w", pady=(8, 0)
+        )
+        ttk.Checkbutton(
+            box, text="发送时绕开中文输入法（中文 IME 会吞掉注入的字符）", variable=app.var_ime, command=app._on_setting_change
+        ).pack(anchor="w", pady=2)
 
         box2 = ttk.LabelFrame(frm, text=" 发送速度 ", padding=12)
         box2.pack(fill="x", pady=(14, 0))
         row2 = ttk.Frame(box2)
         row2.pack(fill="x")
-        tk.Label(row2, text="每字间隔 (ms)", bg=C["panel"], fg=C["muted"],
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
-        sp_delay = ttk.Spinbox(row2, from_=20, to=300, increment=5, width=7,
-                               textvariable=app.var_delay, command=app._on_setting_change)
+        tk.Label(row2, text="每字间隔 (ms)", bg=C["panel"], fg=C["muted"], font=("Microsoft YaHei UI", 9)).pack(side="left")
+        sp_delay = ttk.Spinbox(row2, from_=20, to=300, increment=5, width=7, textvariable=app.var_delay, command=app._on_setting_change)
         sp_delay.pack(side="left", padx=(8, 0))
         sp_delay.bind("<FocusOut>", lambda e: app._on_setting_change())
-        ttk.Button(box2, text="套用「经典版」预设", width=16,
-                   command=lambda: app.apply_preset("经典版")).pack(side="left", padx=(0, 8), pady=(8, 0))
-        ttk.Button(box2, text="套用「决定版」预设", width=16,
-                   command=lambda: app.apply_preset("决定版")).pack(side="left", pady=(8, 0))
-        ttk.Label(box2, text="丢字 → 调大间隔；输入太慢 → 调小。单条秘籍可在编辑对话框里单独覆盖。",
-                  style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+        ttk.Button(box2, text="套用「经典版」预设", width=16, command=lambda: app.apply_preset("经典版")).pack(
+            side="left", padx=(0, 8), pady=(8, 0)
+        )
+        ttk.Button(box2, text="套用「决定版」预设", width=16, command=lambda: app.apply_preset("决定版")).pack(side="left", pady=(8, 0))
+        ttk.Label(box2, text="丢字 → 调大间隔；输入太慢 → 调小。单条秘籍可在编辑对话框里单独覆盖。", style="Muted.TLabel").pack(
+            anchor="w", pady=(6, 0)
+        )
 
         box3 = ttk.LabelFrame(frm, text=" 快捷键与自检 ", padding=12)
         box3.pack(fill="x", pady=(14, 0))
-        ttk.Button(box3, text="重新注册全部快捷键", command=app.apply_hotkeys)\
-            .pack(side="left", padx=(0, 8))
+        ttk.Button(box3, text="重新注册全部快捷键", command=app.apply_hotkeys).pack(side="left", padx=(0, 8))
         ttk.Button(box3, text="快捷键总览", command=app.open_hotkey_overview).pack(side="left")
-        ttk.Button(box3, text="注入自检", command=app.open_test_window)\
-            .pack(side="left", padx=(8, 0))
+        ttk.Button(box3, text="注入自检", command=app.open_test_window).pack(side="left", padx=(8, 0))
         return frm
 
     # -- 游戏（自动切方案规则表） ---------------------------------------------
     def _page_games(self, nb):
         frm = self._page(nb)
-        ttk.Label(frm, text="游戏窗口在前台且稳定 0.8 秒后，自动切换到规则指定的方案。\n"
-                            "推荐按进程名（exe）匹配；发送过程中绝不切换。",
-                  style="Muted.TLabel", justify="left").pack(anchor="w", pady=(0, 8))
+        ttk.Label(
+            frm,
+            text="游戏窗口在前台且稳定 0.8 秒后，自动切换到规则指定的方案。\n推荐按进程名（exe）匹配；发送过程中绝不切换。",
+            style="Muted.TLabel",
+            justify="left",
+        ).pack(anchor="w", pady=(0, 8))
 
         wrap = tk.Frame(frm, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
         wrap.pack(fill="both", expand=True)
         cols = ("name", "match", "pattern", "profile", "enabled")
         self.games_tree = ttk.Treeview(wrap, columns=cols, show="headings", height=7)
         for key, (text, width, anchor) in {
-            "name": ("规则名称", 120, "w"), "match": ("方式", 60, "center"),
-            "pattern": ("匹配内容", 140, "w"), "profile": ("目标方案", 110, "w"),
-            "enabled": ("启用", 50, "center")}.items():
+            "name": ("规则名称", 120, "w"),
+            "match": ("方式", 60, "center"),
+            "pattern": ("匹配内容", 140, "w"),
+            "profile": ("目标方案", 110, "w"),
+            "enabled": ("启用", 50, "center"),
+        }.items():
             self.games_tree.heading(key, text=text)
             self.games_tree.column(key, width=width, anchor=anchor)
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.games_tree.yview)
@@ -678,8 +808,7 @@ class SettingsDialog(tk.Toplevel):
         self.lbl_targets.pack(anchor="w")
         trow = ttk.Frame(tbox)
         trow.pack(fill="x", pady=(6, 0))
-        ttk.Button(trow, text="从 games 规则生成 targets", command=self._migrate_targets)\
-            .pack(side="left")
+        ttk.Button(trow, text="从 games 规则生成 targets", command=self._migrate_targets).pack(side="left")
         self._reload_targets_info()
         return frm
 
@@ -687,10 +816,10 @@ class SettingsDialog(tk.Toplevel):
         targets = self.app.store.get("targets") or []
         self.lbl_targets.configure(
             text=f"当前 {len(targets)} 条通用目标规则"
-                 + (f"（示例：{targets[0]['name']} → {targets[0]['match_type']}:"
-                    f"{targets[0]['pattern']}）" if targets else "")
-                 + "\n非空时优先于上方 games 规则；可带方案 / 发送策略 / IME 策略 / 前台要求。"
-                 + "\n更多字段见 docs/PACK-FORMAT.md 与 CLI：python -m vcct.cli targets")
+            + (f"（示例：{targets[0]['name']} → {targets[0]['match_type']}:{targets[0]['pattern']}）" if targets else "")
+            + "\n非空时优先于上方 games 规则；可带方案 / 发送策略 / IME 策略 / 前台要求。"
+            + "\n更多字段见 docs/PACK-FORMAT.md 与 CLI：python -m vcct.cli targets"
+        )
 
     def _migrate_targets(self):
         app = self.app
@@ -712,9 +841,18 @@ class SettingsDialog(tk.Toplevel):
     def _reload_games(self):
         self.games_tree.delete(*self.games_tree.get_children())
         for i, g in enumerate(self.app.store.get("games") or []):
-            self.games_tree.insert("", "end", iid=str(i), values=(
-                g["name"], "进程" if g["match_type"] == "exe" else "标题",
-                g["pattern"], g["profile"], "✔" if g["enabled"] else "—"))
+            self.games_tree.insert(
+                "",
+                "end",
+                iid=str(i),
+                values=(
+                    g["name"],
+                    "进程" if g["match_type"] == "exe" else "标题",
+                    g["pattern"],
+                    g["profile"],
+                    "✔" if g["enabled"] else "—",
+                ),
+            )
 
     def _add_rule(self):
         dlg = GameRuleDialog(self, self.app, None)
@@ -760,18 +898,22 @@ class SettingsDialog(tk.Toplevel):
         box.pack(fill="x")
         grid = ttk.Frame(box)
         grid.pack()
-        items = [("新建副本", app.new_profile), ("重命名", app.rename_profile),
-                 ("删除当前方案", app.delete_profile), ("导出方案", app.export_profile),
-                 ("导入方案…", app.import_profile), ("导出整包", app.export_bundle),
-                 ("导入整包…", app.import_bundle), ("从备份恢复", app.restore_backup)]
+        items = [
+            ("新建副本", app.new_profile),
+            ("重命名", app.rename_profile),
+            ("删除当前方案", app.delete_profile),
+            ("导出方案", app.export_profile),
+            ("导入方案…", app.import_profile),
+            ("导出整包", app.export_bundle),
+            ("导入整包…", app.import_bundle),
+            ("从备份恢复", app.restore_backup),
+        ]
         for i, (text, cmd) in enumerate(items):
-            ttk.Button(grid, text=text, width=14, command=cmd)\
-                .grid(row=i // 3, column=i % 3, sticky="w", padx=4, pady=4)
+            ttk.Button(grid, text=text, width=14, command=cmd).grid(row=i // 3, column=i % 3, sticky="w", padx=4, pady=4)
 
         box2 = ttk.LabelFrame(frm, text=" 使用统计 ", padding=12)
         box2.pack(fill="x", pady=(14, 0))
-        ttk.Label(box2, text=f"今日已发送 {app.today_count()} 次（按秘籍代码累计）",
-                  style="Muted.TLabel").pack(side="left")
+        ttk.Label(box2, text=f"今日已发送 {app.today_count()} 次（按秘籍代码累计）", style="Muted.TLabel").pack(side="left")
         ttk.Button(box2, text="清空统计", command=app.clear_stats).pack(side="right")
 
         box3 = ttk.LabelFrame(frm, text=" 配置与日志 ", padding=12)
@@ -785,8 +927,7 @@ class SettingsDialog(tk.Toplevel):
         # 2.1-A 数据目录（便携 / 用户目录）
         pbox = ttk.LabelFrame(frm, text=" 数据目录 ", padding=12)
         pbox.pack(fill="x", pady=(14, 0))
-        self.lbl_paths = ttk.Label(pbox, text="", style="Muted.TLabel", justify="left",
-                                    wraplength=560)
+        self.lbl_paths = ttk.Label(pbox, text="", style="Muted.TLabel", justify="left", wraplength=560)
         self.lbl_paths.pack(anchor="w")
         prow = ttk.Frame(pbox)
         prow.pack(fill="x", pady=(8, 0))
@@ -802,9 +943,10 @@ class SettingsDialog(tk.Toplevel):
         label = "便携（exe 旁）" if d["mode"] == "portable" else "用户目录（%LOCALAPPDATA%）"
         self.lbl_paths.configure(
             text=f"当前：{label}　·　数据目录 {d['root']}\n"
-                 f"模式文件：{d['mode_file']}"
-                 + ("" if d["mode_persisted"] else "（只读，本次设置仅当前进程有效）")
-                 + "\n切换只影响下次启动，不会自动搬运或删除任何配置文件。")
+            f"模式文件：{d['mode_file']}"
+            + ("" if d["mode_persisted"] else "（只读，本次设置仅当前进程有效）")
+            + "\n切换只影响下次启动，不会自动搬运或删除任何配置文件。"
+        )
         other = "用户目录" if d["mode"] == "portable" else "exe 旁"
         self.btn_switch_path.configure(text=f"切换到{other}")
 
@@ -812,10 +954,13 @@ class SettingsDialog(tk.Toplevel):
         target = other_mode()
         set_data_mode(target)
         self._reload_paths_info()
-        messagebox.showinfo("已记录切换",
-                            f"下次启动将使用{'用户目录' if target == 'user' else 'exe 旁'}的数据目录。\n\n"
-                            "当前配置仍留在原处，不会被删除。若想把配置也带过去，"
-                            "点「复制配置到另一目录」，再点「立即重启」。", parent=self)
+        messagebox.showinfo(
+            "已记录切换",
+            f"下次启动将使用{'用户目录' if target == 'user' else 'exe 旁'}的数据目录。\n\n"
+            "当前配置仍留在原处，不会被删除。若想把配置也带过去，"
+            "点「复制配置到另一目录」，再点「立即重启」。",
+            parent=self,
+        )
 
     def _copy_config(self):
         target = other_mode()
@@ -838,7 +983,7 @@ class OnboardWizard(tk.Toplevel):
         self.configure(bg=C["bg"])
         self.resizable(False, False)
         self.transient(app.root)
-        bind_dialog_keys(self, self._skip)           # 1.8-G：Esc = 跳过向导
+        bind_dialog_keys(self, self._skip)  # 1.8-G：Esc = 跳过向导
         self.protocol("WM_DELETE_WINDOW", self._skip)
         self.step = 0
         self.var_preset = tk.StringVar(value="经典版")
@@ -847,8 +992,7 @@ class OnboardWizard(tk.Toplevel):
 
         wrap = tk.Frame(self, bg=C["bg"], padx=26, pady=20)
         wrap.pack(fill="both", expand=True)
-        self.lbl_title = tk.Label(wrap, text="", bg=C["bg"], fg=C["text"],
-                                  font=("Microsoft YaHei UI", 14, "bold"), justify="left")
+        self.lbl_title = tk.Label(wrap, text="", bg=C["bg"], fg=C["text"], font=("Microsoft YaHei UI", 14, "bold"), justify="left")
         self.lbl_title.pack(anchor="w")
         self.body = tk.Frame(wrap, bg=C["bg"])
         self.body.pack(fill="both", expand=True, pady=(12, 0))
@@ -877,54 +1021,63 @@ class OnboardWizard(tk.Toplevel):
         else:
             self._page_conflicts()
 
-    def _nav(self, back_text=None, back_cmd=None, next_text="下一步 →", next_cmd=None,
-             next_style="TButton"):
+    def _nav(self, back_text=None, back_cmd=None, next_text="下一步 →", next_cmd=None, next_style="TButton"):
         if back_text:
             ttk.Button(self.btns, text=back_text, command=back_cmd).pack(side="left")
         ttk.Button(self.btns, text="跳过向导", command=self._skip).pack(side="right")
-        ttk.Button(self.btns, text=next_text, style=next_style, command=next_cmd)\
-            .pack(side="right", padx=(0, 10))
+        ttk.Button(self.btns, text=next_text, style=next_style, command=next_cmd).pack(side="right", padx=(0, 10))
 
     def _page_preset(self):
         self.lbl_title.configure(text=t("第 1 步 / 3：选一套发送参数"))
-        tk.Label(self.body, text="经典版适配 GTA VC 原版（30fps 帧轮询，默认推荐）；\n"
-                                 "决定版（Unreal 引擎）输入窗口更宽，整体放慢一档。\n"
-                                 "之后可在 设置 → 输入 随时改。",
-                 bg=C["bg"], fg="#374151", justify="left",
-                 font=("Microsoft YaHei UI", 10)).pack(anchor="w")
+        tk.Label(
+            self.body,
+            text="经典版适配 GTA VC 原版（30fps 帧轮询，默认推荐）；\n"
+            "决定版（Unreal 引擎）输入窗口更宽，整体放慢一档。\n"
+            "之后可在 设置 → 输入 随时改。",
+            bg=C["bg"],
+            fg="#374151",
+            justify="left",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(anchor="w")
         box = tk.Frame(self.body, bg=C["bg"])
         box.pack(anchor="w", pady=(14, 0))
         for name in ("经典版", "决定版"):
-            tk.Radiobutton(box, text=name, variable=self.var_preset, value=name,
-                           bg=C["bg"], font=("Microsoft YaHei UI", 11),
-                           selectcolor="#ffffff").pack(anchor="w", pady=2)
-        ttk.Checkbutton(self.body, text="游戏在前台时自动启用这套参数"
-                                        "（按进程 gta-vc 识别，可稍后在 设置 → 游戏 修改）",
-                        variable=self.var_rule).pack(anchor="w", pady=(14, 0))
+            tk.Radiobutton(
+                box, text=name, variable=self.var_preset, value=name, bg=C["bg"], font=("Microsoft YaHei UI", 11), selectcolor="#ffffff"
+            ).pack(anchor="w", pady=2)
+        ttk.Checkbutton(
+            self.body, text="游戏在前台时自动启用这套参数（按进程 gta-vc 识别，可稍后在 设置 → 游戏 修改）", variable=self.var_rule
+        ).pack(anchor="w", pady=(14, 0))
         self._nav(next_text="下一步 →", next_cmd=lambda: self._show(1))
 
     def _page_verify(self):
         self.lbl_title.configure(text=t("第 2 步 / 3：验证按键能送达"))
         app = self.app
         hk = next((c["hotkey"] for c in app.cheats if c["hotkey"]), "（未绑定）")
-        tk.Label(self.body, text=f"当前方案「{app.active_profile}」的第一个热键是 {hk}。\n\n"
-                                 "先跑一次注入自检（约 1 秒，会短暂抢一下前台）：",
-                 bg=C["bg"], fg="#374151", justify="left",
-                 font=("Microsoft YaHei UI", 10)).pack(anchor="w")
+        tk.Label(
+            self.body,
+            text=f"当前方案「{app.active_profile}」的第一个热键是 {hk}。\n\n先跑一次注入自检（约 1 秒，会短暂抢一下前台）：",
+            bg=C["bg"],
+            fg="#374151",
+            justify="left",
+            font=("Microsoft YaHei UI", 10),
+        ).pack(anchor="w")
         row = tk.Frame(self.body, bg=C["bg"])
         row.pack(anchor="w", pady=(12, 0))
         ttk.Button(row, text="▶ 运行注入自检", command=self._run_probe).pack(side="left")
-        self.lbl_probe = tk.Label(row, text="", bg=C["bg"], fg=C["muted"],
-                                  font=("Microsoft YaHei UI", 10))
+        self.lbl_probe = tk.Label(row, text="", bg=C["bg"], fg=C["muted"], font=("Microsoft YaHei UI", 10))
         self.lbl_probe.pack(side="left", padx=(12, 0))
         if self.probe_ok is not None:
             self._show_probe_result()
-        tk.Label(self.body, text="提示：若游戏以管理员身份运行，本工具也需要管理员权限\n"
-                                 "（否则 Windows 会静默丢弃按键，右上角会出红色告警）。",
-                 bg=C["bg"], fg="#6b7280", justify="left",
-                 font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(16, 0))
-        self._nav(back_text="← 上一步", back_cmd=lambda: self._show(0),
-                  next_text="下一步 →", next_cmd=lambda: self._show(2))
+        tk.Label(
+            self.body,
+            text="提示：若游戏以管理员身份运行，本工具也需要管理员权限\n（否则 Windows 会静默丢弃按键，右上角会出红色告警）。",
+            bg=C["bg"],
+            fg="#6b7280",
+            justify="left",
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(16, 0))
+        self._nav(back_text="← 上一步", back_cmd=lambda: self._show(0), next_text="下一步 →", next_cmd=lambda: self._show(2))
 
     def _run_probe(self):
         self.lbl_probe.configure(text=t("自检中…"))
@@ -948,9 +1101,7 @@ class OnboardWizard(tk.Toplevel):
         if self.probe_ok:
             self.lbl_probe.configure(text=t("✔ 注入链路正常"), foreground=C["ok"])
         else:
-            self.lbl_probe.configure(
-                text="✖ 未能收到字符（不影响试用，可点「⋯ 更多 → 环境诊断」定位）",
-                foreground=C["warn"])
+            self.lbl_probe.configure(text="✖ 未能收到字符（不影响试用，可点「⋯ 更多 → 环境诊断」定位）", foreground=C["warn"])
 
     def _page_conflicts(self):
         self.lbl_title.configure(text=t("第 3 步 / 3：快捷键冲突检查"))
@@ -961,19 +1112,28 @@ class OnboardWizard(tk.Toplevel):
                 c = self.app.by_id(cid)
                 names.append(f"· {c['name'] if c else cid}：{reason}")
             text = "\n".join(names[:8])
-            tk.Label(self.body, text=f"检测到 {len(conflicts)} 个快捷键不可用：\n\n{text}",
-                     bg=C["bg"], fg=C["warn"], justify="left",
-                     font=("Microsoft YaHei UI", 10)).pack(anchor="w")
-            ttk.Button(self.body, text="自动分配可用键", command=self._auto_fix)\
-                .pack(anchor="w", pady=(12, 0))
+            tk.Label(
+                self.body,
+                text=f"检测到 {len(conflicts)} 个快捷键不可用：\n\n{text}",
+                bg=C["bg"],
+                fg=C["warn"],
+                justify="left",
+                font=("Microsoft YaHei UI", 10),
+            ).pack(anchor="w")
+            ttk.Button(self.body, text="自动分配可用键", command=self._auto_fix).pack(anchor="w", pady=(12, 0))
         else:
-            tk.Label(self.body, text="✔ 没有冲突，全部快捷键已就绪。\n\n"
-                                     "切到游戏窗口按热键即可触发秘籍。",
-                     bg=C["bg"], fg=C["ok"], justify="left",
-                     font=("Microsoft YaHei UI", 11)).pack(anchor="w")
+            tk.Label(
+                self.body,
+                text="✔ 没有冲突，全部快捷键已就绪。\n\n切到游戏窗口按热键即可触发秘籍。",
+                bg=C["bg"],
+                fg=C["ok"],
+                justify="left",
+                font=("Microsoft YaHei UI", 11),
+            ).pack(anchor="w")
         ttk.Button(self.body, text="↻ 重新检测", command=self._redetect).pack(anchor="w", pady=(10, 0))
-        self._nav(back_text="← 上一步", back_cmd=lambda: self._show(1),
-                  next_text="完成 ✔", next_cmd=self._finish, next_style="Accent.TButton")
+        self._nav(
+            back_text="← 上一步", back_cmd=lambda: self._show(1), next_text="完成 ✔", next_cmd=self._finish, next_style="Accent.TButton"
+        )
 
     def _redetect(self):
         self.app.apply_hotkeys()
@@ -991,8 +1151,7 @@ class OnboardWizard(tk.Toplevel):
         if self.var_rule.get():
             games = app.store.setdefault("games", [])
             if not any(g["match_type"] == "exe" and g["pattern"] == "gta-vc" for g in games):
-                games.append({"name": "GTA VC", "match_type": "exe", "pattern": "gta-vc",
-                              "profile": app.active_profile, "enabled": True})
+                games.append({"name": "GTA VC", "match_type": "exe", "pattern": "gta-vc", "profile": app.active_profile, "enabled": True})
             app.settings["auto_switch"] = True
         app._on_setting_change()
         app.log("向导完成。切到游戏窗口按热键即可；设置里可随时调整全部选项。", "ok")
@@ -1014,7 +1173,7 @@ class HotkeyOverview(tk.Toplevel):
         self.title("快捷键总览")
         self.configure(bg=C["bg"])
         self.transient(app.root)
-        bind_dialog_keys(self)                       # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
         self.geometry(f"{int(720 * app.ui)}x{int(460 * app.ui)}")
 
         wrap = tk.Frame(self, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
@@ -1022,9 +1181,12 @@ class HotkeyOverview(tk.Toplevel):
         cols = ("name", "profile", "hotkey", "state", "note")
         self.tree = ttk.Treeview(wrap, columns=cols, show="headings")
         for key, (text, width, anchor) in {
-            "name": ("条目", 200, "w"), "profile": ("所属方案", 110, "w"),
-            "hotkey": ("快捷键", 120, "center"), "state": ("状态", 150, "center"),
-            "note": ("说明", 260, "w")}.items():
+            "name": ("条目", 200, "w"),
+            "profile": ("所属方案", 110, "w"),
+            "hotkey": ("快捷键", 120, "center"),
+            "state": ("状态", 150, "center"),
+            "note": ("说明", 260, "w"),
+        }.items():
             self.tree.heading(key, text=text)
             self.tree.column(key, width=width, anchor=anchor, stretch=(key in ("name", "note")))
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
@@ -1034,7 +1196,7 @@ class HotkeyOverview(tk.Toplevel):
         self.tree.tag_configure("conflict", foreground=C["warn"])
         self.tree.tag_configure("idle", foreground="#98a2b3")
 
-        btns = ttk.Frame(self)   # ttk 不接受 bg=，颜色由 style 统一继承
+        btns = ttk.Frame(self)  # ttk 不接受 bg=，颜色由 style 统一继承
         btns.pack(fill="x", padx=12, pady=(2, 10))
         ttk.Button(btns, text="↻ 重新检测占用", command=self._redetect).pack(side="left")
         ttk.Button(btns, text="导出为文本…", command=self._export).pack(side="left", padx=(8, 0))
@@ -1066,10 +1228,13 @@ class HotkeyOverview(tk.Toplevel):
             state = f"✖ {app.conflicts[PAUSE_ID]}"
         else:
             state = "✔ 生效"
-        self.tree.insert("", "end", iid="__pause__",
-                         values=("全局暂停键", "全局", pause_combo, state,
-                                 "一键注销/恢复全部秘籍热键"),
-                         tags=("conflict",) if "✖" in state else ())
+        self.tree.insert(
+            "",
+            "end",
+            iid="__pause__",
+            values=("全局暂停键", "全局", pause_combo, state, "一键注销/恢复全部秘籍热键"),
+            tags=("conflict",) if "✖" in state else (),
+        )
         for prof in app.store["profiles"]:
             active = prof["name"] == app.active_profile
             for c in prof["cheats"]:
@@ -1077,10 +1242,13 @@ class HotkeyOverview(tk.Toplevel):
                     continue
                 iid = f"{prof['name']}:{c['id']}"
                 if not active:
-                    self.tree.insert("", "end", iid=iid,
-                                     values=(c["name"], prof["name"], c["hotkey"],
-                                             "未注册（切到该方案时生效）", c["note"]),
-                                     tags=("idle",))
+                    self.tree.insert(
+                        "",
+                        "end",
+                        iid=iid,
+                        values=(c["name"], prof["name"], c["hotkey"], "未注册（切到该方案时生效）", c["note"]),
+                        tags=("idle",),
+                    )
                     continue
                 if c["id"] in app.conflicts:
                     state = f"✖ {app.conflicts[c['id']]}"
@@ -1088,9 +1256,7 @@ class HotkeyOverview(tk.Toplevel):
                 else:
                     state = "✔ 生效"
                     tags = ()
-                self.tree.insert("", "end", iid=iid,
-                                 values=(c["name"], prof["name"], c["hotkey"],
-                                         state, c["note"]), tags=tags)
+                self.tree.insert("", "end", iid=iid, values=(c["name"], prof["name"], c["hotkey"], state, c["note"]), tags=tags)
         alive = [i for i in keep if self.tree.exists(i)]
         if alive:
             self.tree.selection_set(*alive)
@@ -1104,15 +1270,14 @@ class HotkeyOverview(tk.Toplevel):
 
     def _export(self):
         path = filedialog.asksaveasfilename(
-            title="导出快捷键总览", defaultextension=".txt",
-            initialfile="hotkeys.txt", filetypes=[("文本", "*.txt")], parent=self)
+            title="导出快捷键总览", defaultextension=".txt", initialfile="hotkeys.txt", filetypes=[("文本", "*.txt")], parent=self
+        )
         if not path:
             return
         lines = [f"{APP_NAME} v{APP_VER} 快捷键总览（{time.strftime('%Y-%m-%d %H:%M')}）", ""]
         for item in self.tree.get_children():
             vals = self.tree.item(item, "values")
-            lines.append(f"{vals[0]}\t[{vals[1]}]\t{vals[2]}\t{vals[3]}"
-                         + (f"\t{vals[4]}" if vals[4] else ""))
+            lines.append(f"{vals[0]}\t[{vals[1]}]\t{vals[2]}\t{vals[3]}" + (f"\t{vals[4]}" if vals[4] else ""))
         try:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(lines) + "\n")
@@ -1133,7 +1298,7 @@ class PackManagerDialog(tk.Toplevel):
         self.title("秘籍包管理（.vcpack）")
         self.configure(bg=C["bg"])
         self.transient(app.root)
-        bind_dialog_keys(self)                       # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
         self.geometry(f"{int(720 * app.ui)}x{int(520 * app.ui)}")
 
         nb = ttk.Notebook(self)
@@ -1151,9 +1316,9 @@ class PackManagerDialog(tk.Toplevel):
         ttk.Button(top, text="选择 .vcpack / .json 文件…", command=self._choose).pack(side="left")
         self.lbl_file = ttk.Label(top, text="未选择文件", style="Muted.TLabel")
         self.lbl_file.pack(side="left", padx=(10, 0))
-        self.lbl_warn = tk.Label(frm, text="", bg=C["bg"], fg=C["warn"],
-                                 wraplength=620, justify="left",
-                                 font=("Microsoft YaHei UI", 9), anchor="w")
+        self.lbl_warn = tk.Label(
+            frm, text="", bg=C["bg"], fg=C["warn"], wraplength=620, justify="left", font=("Microsoft YaHei UI", 9), anchor="w"
+        )
         self.lbl_warn.pack(fill="x", pady=(6, 0))
 
         wrap = tk.Frame(frm, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
@@ -1161,9 +1326,12 @@ class PackManagerDialog(tk.Toplevel):
         cols = ("pick", "status", "code", "name", "hotkey", "local")
         self.diff_tree = ttk.Treeview(wrap, columns=cols, show="headings", selectmode="extended")
         for key, (text, width, anchor) in {
-            "pick": ("勾选", 46, "center"), "status": ("状态", 80, "center"),
-            "code": ("秘籍代码", 170, "w"), "name": ("名称", 130, "w"),
-            "hotkey": ("包内热键", 100, "center"), "local": ("本地热键", 100, "center"),
+            "pick": ("勾选", 46, "center"),
+            "status": ("状态", 80, "center"),
+            "code": ("秘籍代码", 170, "w"),
+            "name": ("名称", 130, "w"),
+            "hotkey": ("包内热键", 100, "center"),
+            "local": ("本地热键", 100, "center"),
         }.items():
             self.diff_tree.heading(key, text=text)
             self.diff_tree.column(key, width=width, anchor=anchor)
@@ -1177,25 +1345,19 @@ class PackManagerDialog(tk.Toplevel):
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=(8, 0))
         ttk.Button(btns, text="全选", width=8, command=lambda: self._select_all()).pack(side="left")
-        ttk.Button(btns, text="仅选新增", width=11, command=lambda: self._select_status("new"))\
-            .pack(side="left", padx=(6, 0))
-        ttk.Button(btns, text="清空选择", width=10,
-                   command=lambda: self.diff_tree.selection_remove(
-                       *self.diff_tree.get_children())).pack(side="left", padx=(6, 0))
+        ttk.Button(btns, text="仅选新增", width=11, command=lambda: self._select_status("new")).pack(side="left", padx=(6, 0))
+        ttk.Button(btns, text="清空选择", width=10, command=lambda: self.diff_tree.selection_remove(*self.diff_tree.get_children())).pack(
+            side="left", padx=(6, 0)
+        )
         self.var_overwrite = tk.BooleanVar(value=True)
-        ttk.Checkbutton(btns, text="冲突项覆盖本地", variable=self.var_overwrite)\
-            .pack(side="left", padx=(14, 0))
-        self.var_auto_avoid = tk.BooleanVar(value=True)     # 1.9-G
-        ttk.Checkbutton(btns, text="自动避让热键冲突", variable=self.var_auto_avoid)\
-            .pack(side="left", padx=(10, 0))
-        ttk.Button(btns, text="导入所选 →", style="Accent.TButton", command=self._do_import)\
-            .pack(side="right")
+        ttk.Checkbutton(btns, text="冲突项覆盖本地", variable=self.var_overwrite).pack(side="left", padx=(14, 0))
+        self.var_auto_avoid = tk.BooleanVar(value=True)  # 1.9-G
+        ttk.Checkbutton(btns, text="自动避让热键冲突", variable=self.var_auto_avoid).pack(side="left", padx=(10, 0))
+        ttk.Button(btns, text="导入所选 →", style="Accent.TButton", command=self._do_import).pack(side="right")
         return frm
 
     def _choose(self):
-        path = filedialog.askopenfilename(
-            title="选择秘籍包", filetypes=[("秘籍包", "*.vcpack *.json"), ("所有文件", "*.*")],
-            parent=self)
+        path = filedialog.askopenfilename(title="选择秘籍包", filetypes=[("秘籍包", "*.vcpack *.json"), ("所有文件", "*.*")], parent=self)
         if not path:
             return
         try:
@@ -1213,13 +1375,10 @@ class PackManagerDialog(tk.Toplevel):
         # 1.9-G 自动避让：只在真冲突时把包内热键改到候选空闲键
         avoid_note = ""
         if self.var_auto_avoid.get():
-            pack, changed = auto_avoid_hotkeys(
-                pack, self.app.cheats, self.app.settings.get("pause_hotkey", ""))
+            pack, changed = auto_avoid_hotkeys(pack, self.app.cheats, self.app.settings.get("pause_hotkey", ""))
             if changed:
-                pairs = "、".join(f"{x['code']}:{x['old']}→{x['new'] or '留空'}"
-                                 for x in changed[:3])
-                avoid_note = (f"　｜　自动避让 {len(changed)} 个热键冲突（{pairs}"
-                              + ("…" if len(changed) > 3 else "") + "）")
+                pairs = "、".join(f"{x['code']}:{x['old']}→{x['new'] or '留空'}" for x in changed[:3])
+                avoid_note = f"　｜　自动避让 {len(changed)} 个热键冲突（{pairs}" + ("…" if len(changed) > 3 else "") + "）"
         # 1.9-H 包版本比对（纯本地，不联网）
         status, _old = compare_pack_record(pack, self.app.store.get("packs") or [])
         version_note = {
@@ -1237,9 +1396,14 @@ class PackManagerDialog(tk.Toplevel):
         added = sum(1 for d in self.diff if d["status"] == "new")
         conflict = sum(1 for d in self.diff if d["status"] == "conflict")
         same = sum(1 for d in self.diff if d["status"] == "same")
-        self.lbl_warn.configure(text=(self.lbl_warn.cget("text") +
-                                     f"　｜　包「{name}」：新增 {added} / 冲突 {conflict} / 相同 {same}"
-                                     + avoid_note + f"　｜　{version_note}"))
+        self.lbl_warn.configure(
+            text=(
+                self.lbl_warn.cget("text")
+                + f"　｜　包「{name}」：新增 {added} / 冲突 {conflict} / 相同 {same}"
+                + avoid_note
+                + f"　｜　{version_note}"
+            )
+        )
         self._select_status("new")
 
     def _reload_diff(self):
@@ -1247,10 +1411,13 @@ class PackManagerDialog(tk.Toplevel):
         labels = {"new": "新增", "conflict": "冲突", "same": "相同"}
         for d in self.diff:
             local = (d["existing"] or {}).get("hotkey") or "—"
-            self.diff_tree.insert("", "end", iid=d["code"],
-                                 values=("☐", labels[d["status"]], d["code"], d["name"],
-                                         d["incoming"].get("hotkey") or "—", local),
-                                 tags=(d["status"],) if d["status"] != "new" else ())
+            self.diff_tree.insert(
+                "",
+                "end",
+                iid=d["code"],
+                values=("☐", labels[d["status"]], d["code"], d["name"], d["incoming"].get("hotkey") or "—", local),
+                tags=(d["status"],) if d["status"] != "new" else (),
+            )
 
     def _select_all(self):
         self.diff_tree.selection_set(*self.diff_tree.get_children())
@@ -1268,17 +1435,17 @@ class PackManagerDialog(tk.Toplevel):
         if not codes:
             messagebox.showinfo("未选择", "请在差异表里勾选要导入的条目（行可多选）。", parent=self)
             return
-        merged, counts = merge_pack(self.app.cheats, self.pack, codes,
-                                    overwrite=bool(self.var_overwrite.get()))
-        self.app.cheats[:] = merged       # 原地替换，保持与 store 内列表的引用
+        merged, counts = merge_pack(self.app.cheats, self.pack, codes, overwrite=bool(self.var_overwrite.get()))
+        self.app.cheats[:] = merged  # 原地替换，保持与 store 内列表的引用
         packs = self.app.store.setdefault("packs", [])
         rec = pack_record(self.pack)
         packs[:] = [p for p in packs if p.get("name") != rec["name"]] + [rec]
         self.app.persist()
         self.app.refresh_tree()
         self.app.apply_hotkeys()
-        self.app.log(f"导入秘籍包「{self.pack['name']}」：新增 {counts['added']} / "
-                     f"覆盖 {counts['updated']} / 跳过 {counts['skipped']}。", "ok")
+        self.app.log(
+            f"导入秘籍包「{self.pack['name']}」：新增 {counts['added']} / 覆盖 {counts['updated']} / 跳过 {counts['skipped']}。", "ok"
+        )
         self._load_installed()
         self.pack, self.diff = None, []
         self.diff_tree.delete(*self.diff_tree.get_children())
@@ -1287,37 +1454,41 @@ class PackManagerDialog(tk.Toplevel):
     # -- 导出 ---------------------------------------------------------------
     def _page_export(self, nb):
         frm = ttk.Frame(nb, padding=18)
-        ttk.Label(frm, text="把当前方案的秘籍导出成一个可分享的 .vcpack 文件。",
-                  style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(frm, text="把当前方案的秘籍导出成一个可分享的 .vcpack 文件。", style="Muted.TLabel").pack(anchor="w")
         box = ttk.LabelFrame(frm, text=" 包信息 ", padding=12)
         box.pack(fill="x", pady=(14, 0))
         self.var_name = tk.StringVar(value=f"{self.app.active_profile} · 秘籍包")
         self.var_author = tk.StringVar(value="")
         self.var_game = tk.StringVar(value=self._current_game())
-        for i, (label, var) in enumerate((("名称", self.var_name), ("作者", self.var_author),
-                                          ("适用游戏", self.var_game))):
+        for i, (label, var) in enumerate((("名称", self.var_name), ("作者", self.var_author), ("适用游戏", self.var_game))):
             ttk.Label(box, text=label).grid(row=i, column=0, sticky="w", pady=5, padx=(0, 12))
             tk.Entry(box, textvariable=var, width=38).grid(row=i, column=1, sticky="ew", pady=5)
-        ttk.Button(frm, text="导出为 .vcpack…", style="Accent.TButton",
-                   command=self._do_export).pack(anchor="w", pady=(18, 0))
-        ttk.Label(frm, text=f"当前方案「{self.app.active_profile}」共 {len(self.app.cheats)} 条；"
-                            "包内含 sha256 校验，手工修改后仍可导入（会提示校验不符）。",
-                  style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(12, 0))
+        ttk.Button(frm, text="导出为 .vcpack…", style="Accent.TButton", command=self._do_export).pack(anchor="w", pady=(18, 0))
+        ttk.Label(
+            frm,
+            text=f"当前方案「{self.app.active_profile}」共 {len(self.app.cheats)} 条；"
+            "包内含 sha256 校验，手工修改后仍可导入（会提示校验不符）。",
+            style="Muted.TLabel",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", pady=(12, 0))
         return frm
 
     def _current_game(self) -> str:
-        prof = next((p for p in self.app.store["profiles"]
-                     if p["name"] == self.app.active_profile), {})
+        prof = next((p for p in self.app.store["profiles"] if p["name"] == self.app.active_profile), {})
         return str(prof.get("game") or DEFAULT_GAME)
 
     def _do_export(self):
         path = filedialog.asksaveasfilename(
-            title="导出秘籍包", defaultextension=".vcpack", initialfile="cheats.vcpack",
-            filetypes=[("秘籍包", "*.vcpack"), ("JSON", "*.json")], parent=self)
+            title="导出秘籍包",
+            defaultextension=".vcpack",
+            initialfile="cheats.vcpack",
+            filetypes=[("秘籍包", "*.vcpack"), ("JSON", "*.json")],
+            parent=self,
+        )
         if not path:
             return
-        pack = make_pack(self.var_name.get(), self.app.cheats,
-                         author=self.var_author.get(), game=self.var_game.get())
+        pack = make_pack(self.var_name.get(), self.app.cheats, author=self.var_author.get(), game=self.var_game.get())
         try:
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(pack, fh, ensure_ascii=False, indent=2)
@@ -1328,11 +1499,14 @@ class PackManagerDialog(tk.Toplevel):
     # -- 已安装 -------------------------------------------------------------
     def _page_installed(self, nb):
         frm = ttk.Frame(nb, padding=14)
-        self.inst_tree = ttk.Treeview(frm, columns=("name", "author", "game", "ver", "time"),
-                                      show="headings", height=10)
-        for key, (text, width) in {"name": ("包名", 200), "author": ("作者", 110),
-                                   "game": ("游戏", 130), "ver": ("包版本", 70),
-                                   "time": ("导入时间", 150)}.items():
+        self.inst_tree = ttk.Treeview(frm, columns=("name", "author", "game", "ver", "time"), show="headings", height=10)
+        for key, (text, width) in {
+            "name": ("包名", 200),
+            "author": ("作者", 110),
+            "game": ("游戏", 130),
+            "ver": ("包版本", 70),
+            "time": ("导入时间", 150),
+        }.items():
             self.inst_tree.heading(key, text=text)
             self.inst_tree.column(key, width=width)
         self.inst_tree.pack(fill="both", expand=True)
@@ -1345,8 +1519,7 @@ class PackManagerDialog(tk.Toplevel):
             return
         self.inst_tree.delete(*self.inst_tree.get_children())
         for i, p in enumerate(self.app.store.get("packs") or []):
-            self.inst_tree.insert("", "end", iid=str(i), values=(
-                p["name"], p["author"], p["game"], p["pack_version"], p["imported_at"]))
+            self.inst_tree.insert("", "end", iid=str(i), values=(p["name"], p["author"], p["game"], p["pack_version"], p["imported_at"]))
 
     def _remove_record(self):
         sel = self.inst_tree.selection()
@@ -1371,14 +1544,24 @@ class TextImportDialog(tk.Toplevel):
         self.title("从文本 / CSV 粘贴导入")
         self.configure(bg=C["bg"])
         self.transient(app.root)
-        bind_dialog_keys(self)                       # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
         self.geometry(f"{int(700 * app.ui)}x{int(540 * app.ui)}")
 
-        hint = ("每行一条：代码  |  名称,代码  |  名称,代码,热键  |  名称,代码,热键,备注\n"
-                "（逗号或 Tab 分隔；# 开头为注释；热键需带 Ctrl/Alt/Shift 或 F1–F12）")
+        hint = (
+            "每行一条：代码  |  名称,代码  |  名称,代码,热键  |  名称,代码,热键,备注\n"
+            "（逗号或 Tab 分隔；# 开头为注释；热键需带 Ctrl/Alt/Shift 或 F1–F12）"
+        )
         ttk.Label(self, text=hint, style="Muted.TLabel", justify="left").pack(anchor="w", padx=12, pady=(12, 4))
-        self.txt = tk.Text(self, height=8, font=("Consolas", 10), wrap="none", relief="flat",
-                           bg="#ffffff", highlightthickness=1, highlightbackground=C["line"])
+        self.txt = tk.Text(
+            self,
+            height=8,
+            font=("Consolas", 10),
+            wrap="none",
+            relief="flat",
+            bg="#ffffff",
+            highlightthickness=1,
+            highlightbackground=C["line"],
+        )
         self.txt.pack(fill="x", padx=12)
         bar = ttk.Frame(self)
         bar.pack(fill="x", padx=12, pady=(6, 0))
@@ -1389,11 +1572,14 @@ class TextImportDialog(tk.Toplevel):
         self.lbl_result = ttk.Label(bar, text="", style="Muted.TLabel")
         self.lbl_result.pack(side="right", padx=(0, 12))
 
-        self.tree = ttk.Treeview(self, columns=("line", "code", "name", "hotkey", "msg"),
-                                 show="headings", selectmode="extended")
-        for key, (text, width) in {"line": ("行号", 60), "code": ("代码", 160),
-                                   "name": ("名称", 140), "hotkey": ("热键", 100),
-                                   "msg": ("说明", 300)}.items():
+        self.tree = ttk.Treeview(self, columns=("line", "code", "name", "hotkey", "msg"), show="headings", selectmode="extended")
+        for key, (text, width) in {
+            "line": ("行号", 60),
+            "code": ("代码", 160),
+            "name": ("名称", 140),
+            "hotkey": ("热键", 100),
+            "msg": ("说明", 300),
+        }.items():
             self.tree.heading(key, text=text)
             self.tree.column(key, width=width)
         self.tree.tag_configure("error", foreground=C["warn"])
@@ -1411,11 +1597,9 @@ class TextImportDialog(tk.Toplevel):
                 skipped += 1
                 continue
             self.items.append(item)
-            self.tree.insert("", "end", values=(i, item["code"], item["name"],
-                                                item["hotkey"] or "—", "可导入"))
+            self.tree.insert("", "end", values=(i, item["code"], item["name"], item["hotkey"] or "—", "可导入"))
         for err in errors:
-            self.tree.insert("", "end", values=(err["line"], "—", err["raw"][:30], "—",
-                                                err["reason"]), tags=("error",))
+            self.tree.insert("", "end", values=(err["line"], "—", err["raw"][:30], "—", err["reason"]), tags=("error",))
         self.lbl_result.configure(text=f"可导入 {len(self.items)} 条 · 跳过重复 {skipped} · 报错 {len(errors)} 行")
 
     def _do_import(self):
@@ -1432,8 +1616,7 @@ class TextImportDialog(tk.Toplevel):
         self.app.refresh_tree()
         self.app.apply_hotkeys()
         self.app.log(f"文本导入完成：新增 {added} 条（未验证，默认不绑定或按文本指定热键）。", "ok")
-        messagebox.showinfo("导入完成", f"已导入 {added} 条。\n导入条目默认标注「未实机验证」，"
-                                        "请核对后在列表里绑定热键。", parent=self)
+        messagebox.showinfo("导入完成", f"已导入 {added} 条。\n导入条目默认标注「未实机验证」，请核对后在列表里绑定热键。", parent=self)
         self.destroy()
 
 
@@ -1447,11 +1630,12 @@ class TemplateDialog(tk.Toplevel):
         self.title("套用游戏模板")
         self.configure(bg=C["bg"])
         self.transient(app.root)
-        bind_dialog_keys(self)                       # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
         self.geometry(f"{int(560 * app.ui)}x{int(430 * app.ui)}")
 
-        ttk.Label(self, text="选择一套模板：会替换秘籍表并（若有）套用对应发送参数。",
-                  style="Muted.TLabel").pack(anchor="w", padx=14, pady=(14, 6))
+        ttk.Label(self, text="选择一套模板：会替换秘籍表并（若有）套用对应发送参数。", style="Muted.TLabel").pack(
+            anchor="w", padx=14, pady=(14, 6)
+        )
         row = ttk.Frame(self)
         row.pack(fill="both", expand=True, padx=14)
         self.var_choice = tk.StringVar(value=DEFAULT_GAME)
@@ -1460,15 +1644,17 @@ class TemplateDialog(tk.Toplevel):
             self.lst.insert("end", name)
         self.lst.pack(side="left", fill="y")
         self.lst.selection_set(0)
-        self.lbl_info = tk.Label(row, text="", bg=C["bg"], fg=C["text"], justify="left",
-                                 anchor="nw", wraplength=330, font=("Microsoft YaHei UI", 10))
+        self.lbl_info = tk.Label(
+            row, text="", bg=C["bg"], fg=C["text"], justify="left", anchor="nw", wraplength=330, font=("Microsoft YaHei UI", 10)
+        )
         self.lbl_info.pack(side="left", fill="both", expand=True, padx=(12, 0))
         self.lst.bind("<<ListboxSelect>>", lambda e: self._show_info())
         self._show_info()
 
         self.var_new = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self, text="新建方案存放（取消勾选 = 替换当前方案内容，可 Ctrl+Z 之外不可撤销）",
-                        variable=self.var_new).pack(anchor="w", padx=14, pady=(10, 0))
+        ttk.Checkbutton(self, text="新建方案存放（取消勾选 = 替换当前方案内容，可 Ctrl+Z 之外不可撤销）", variable=self.var_new).pack(
+            anchor="w", padx=14, pady=(10, 0)
+        )
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=14, pady=(8, 12))
         ttk.Button(btns, text="套用", style="Accent.TButton", command=self._apply).pack(side="right")
@@ -1498,9 +1684,8 @@ class TemplateDialog(tk.Toplevel):
         if not cheats:
             return
         if not info_verified(name) and not messagebox.askyesno(
-                "未验证模板",
-                f"「{name}」的秘籍均为公开文本、未在本工具实机验证。\n"
-                "仍要套用吗？（会灰显标注，默认不绑定热键）", parent=self):
+            "未验证模板", f"「{name}」的秘籍均为公开文本、未在本工具实机验证。\n仍要套用吗？（会灰显标注，默认不绑定热键）", parent=self
+        ):
             return
         if self.var_new.get():
             base = name.replace("（未验证）", "")
@@ -1522,8 +1707,7 @@ class TemplateDialog(tk.Toplevel):
         app.persist()
         app.refresh_tree()
         app.apply_hotkeys()
-        app.log(f"已套用游戏模板「{name}」（{len(cheats)} 条"
-                + (f"，参数 {preset['char_interval_ms']}ms" if preset else "") + "）。", "ok")
+        app.log(f"已套用游戏模板「{name}」（{len(cheats)} 条" + (f"，参数 {preset['char_interval_ms']}ms" if preset else "") + "）。", "ok")
         self.destroy()
 
 
@@ -1532,7 +1716,7 @@ def bind_dialog_keys(win: tk.Toplevel, on_escape=None):
 
     Tab 顺序沿用控件创建顺序；列表 ↑↓ / Enter 发送由 Treeview 与既有绑定负责。
     """
-    win.bind("<Escape>", lambda e: (on_escape() if on_escape else win.destroy()))
+    win.bind("<Escape>", lambda e: on_escape() if on_escape else win.destroy())
     try:
         win.title(t(win.title()))
         win.after_idle(lambda: apply_locale_to_widgets(win))
@@ -1553,16 +1737,20 @@ class HistoryDialog(tk.Toplevel):
         self.configure(bg=C["bg"])
         self.transient(app.root)
         self.geometry(f"{int(820 * app.ui)}x{int(440 * app.ui)}")
-        bind_dialog_keys(self)                      # 1.8-G
+        bind_dialog_keys(self)  # 1.8-G
 
         wrap = tk.Frame(self, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
         wrap.pack(fill="both", expand=True, padx=12, pady=(12, 6))
         cols = ("at", "name", "code", "profile", "result", "elapsed", "detail")
         self.tree = ttk.Treeview(wrap, columns=cols, show="headings")
         for key, (text, width) in {
-            "at": ("时间", 140), "name": ("名称", 120), "code": ("代码", 160),
-            "profile": ("方案", 100), "result": ("结果", 90),
-            "elapsed": ("耗时(s)", 80), "detail": ("说明", 300),
+            "at": ("时间", 140),
+            "name": ("名称", 120),
+            "code": ("代码", 160),
+            "profile": ("方案", 100),
+            "result": ("结果", 90),
+            "elapsed": ("耗时(s)", 80),
+            "detail": ("说明", 300),
         }.items():
             self.tree.heading(key, text=text)
             self.tree.column(key, width=width, anchor="w" if key in ("name", "code", "detail") else "center")
@@ -1580,18 +1768,27 @@ class HistoryDialog(tk.Toplevel):
         ttk.Button(btns, text="↻ 重发所选", command=self._resend).pack(side="left")
         ttk.Button(btns, text="清空历史", command=self._clear).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right")
-        ttk.Label(btns, text="双击一行也可重发；重发按当前方案中的代码查找。",
-                  style="Muted.TLabel").pack(side="right", padx=(0, 12))
+        ttk.Label(btns, text="双击一行也可重发；重发按当前方案中的代码查找。", style="Muted.TLabel").pack(side="right", padx=(0, 12))
         self.reload()
 
     def reload(self):
         self.tree.delete(*self.tree.get_children())
         for i, h in enumerate(self.app.store.get("history") or []):
-            self.tree.insert("", "end", iid=str(i),
-                             values=(h["at"], h["name"], h["code"], h["profile"],
-                                     self.LABELS.get(h["result"], h["result"]),
-                                     f"{h['elapsed']:.3f}", h["detail"]),
-                             tags=(h["result"],) if h["result"] in self.LABELS else ())
+            self.tree.insert(
+                "",
+                "end",
+                iid=str(i),
+                values=(
+                    h["at"],
+                    h["name"],
+                    h["code"],
+                    h["profile"],
+                    self.LABELS.get(h["result"], h["result"]),
+                    f"{h['elapsed']:.3f}",
+                    h["detail"],
+                ),
+                tags=(h["result"],) if h["result"] in self.LABELS else (),
+            )
 
     def _resend(self):
         sel = self.tree.selection()
@@ -1604,10 +1801,12 @@ class HistoryDialog(tk.Toplevel):
         code = hist[idx]["code"]
         cheat = next((c for c in self.app.cheats if c["code"] == code), None)
         if cheat is None:
-            messagebox.showinfo("当前方案没有这条",
-                                f"代码 {code} 不在当前方案「{self.app.active_profile}」里。\n"
-                                f"记录所属方案：{hist[idx]['profile'] or '未知'}，请先切换方案。",
-                                parent=self)
+            messagebox.showinfo(
+                "当前方案没有这条",
+                f"代码 {code} 不在当前方案「{self.app.active_profile}」里。\n"
+                f"记录所属方案：{hist[idx]['profile'] or '未知'}，请先切换方案。",
+                parent=self,
+            )
             return
         self.app.send_by_id(cheat["id"])
         self.app.log(f"从发送历史重发：{code}", "info")
@@ -1638,27 +1837,29 @@ class CheatApp:
         self.conflicts: dict[str, str] = {}
         self.hotkey_owner: dict[int, str] = {}
         self.sending = threading.Lock()
-        self._stop = threading.Event()   # 置位即停：用户点停止 / 暂停 / 关闭程序
-        self._inflight = ""              # 正在发送的秘籍 id（空 = 空闲）
-        self._last_send: dict[str, float] = {}   # 去抖：秘籍 id -> 上次发送时刻
+        self._stop = threading.Event()  # 置位即停：用户点停止 / 暂停 / 关闭程序
+        self._inflight = ""  # 正在发送的秘籍 id（空 = 空闲）
+        self._last_send: dict[str, float] = {}  # 去抖：秘籍 id -> 上次发送时刻
         self.test_hwnd = 0
         self.game_info: tuple[int, str, str] = (0, "", "")
-        self.game_is_admin: bool | None = None    # 游戏进程是否管理员运行
-        self.is_admin = self_elevated()           # 本工具是否管理员运行
+        self.game_is_admin: bool | None = None  # 游戏进程是否管理员运行
+        self.is_admin = self_elevated()  # 本工具是否管理员运行
         self._toast: tk.Toplevel | None = None
+        self._persist_job = None  # 保存去抖句柄：合并连续写盘
+        self._content_theme: list[tuple] = []  # 内容区换肤注册表 (widget, option, C-key)
         self.last_error = ""
-        self.paused = False              # 暂停状态不持久化：重启即恢复工作（安全侧）
-        self._undo: dict | None = None   # 仅保留最近一步删除
-        self._avoid: set[str] = set()    # 注册时报"已被占用"的键，自动分配时跳过
+        self.paused = False  # 暂停状态不持久化：重启即恢复工作（安全侧）
+        self._undo: dict | None = None  # 仅保留最近一步删除
+        self._avoid: set[str] = set()  # 注册时报"已被占用"的键，自动分配时跳过
         self._auto_fix: dict | None = None
-        self._last_foreign: tuple[int, str, str] = (0, "", "")   # 最近一个非本工具的前台窗口
+        self._last_foreign: tuple[int, str, str] = (0, "", "")  # 最近一个非本工具的前台窗口
         self._kw_fixed = self._heal_target_keywords()
-        self._switch_pending = None      # 1.8 自动切方案防抖：((rule_name, profile), first_seen)
-        self._switch_warned: set[str] = set()   # 规则指向不存在方案：只警告一次
-        self._tray_hinted = False        # 首次最小化到托盘的提示只给一次
-        self._active_target: dict | None = None   # 2.0 当前命中的目标规则解析结果
-        self.hooks = HookBus(enabled=False)      # 2.0 扩展点，默认关闭
-        set_locale(self.settings.get("locale", "zh"))   # 2.1 界面语言（默认中文）
+        self._switch_pending = None  # 1.8 自动切方案防抖：((rule_name, profile), first_seen)
+        self._switch_warned: set[str] = set()  # 规则指向不存在方案：只警告一次
+        self._tray_hinted = False  # 首次最小化到托盘的提示只给一次
+        self._active_target: dict | None = None  # 2.0 当前命中的目标规则解析结果
+        self.hooks = HookBus(enabled=False)  # 2.0 扩展点，默认关闭
+        set_locale(self.settings.get("locale", "zh"))  # 2.1 界面语言（默认中文）
         # 2.2 Nova UI：主题原地写入 const.C，既有上百处 C[...] 引用自动跟随
         self.ui_mode = _cli_ui_mode or self.settings.get("ui_mode", "nova")
         self.nova_ui = self.ui_mode == "nova"
@@ -1691,9 +1892,10 @@ class CheatApp:
             tooltip=f"{APP_NAME} v{APP_VER}",
             emit=lambda action: self.events.put(("tray", action)),
             is_paused=lambda: self.paused,
-            on_error=lambda msg: append_log(msg, "WARN"))
+            on_error=lambda msg: append_log(msg, "WARN"),
+        )
         if self.tray.available:
-            self.root.bind("<Unmap>", self._on_unmap)   # 最小化也进托盘
+            self.root.bind("<Unmap>", self._on_unmap)  # 最小化也进托盘
         # 1.8 首次启动向导：空配置（或从未走过）必弹；设置里可重新打开
         if not self.settings.get("onboarded", False):
             self.root.after(800, self.open_wizard)
@@ -1702,13 +1904,15 @@ class CheatApp:
         append_log(f"启动 {APP_NAME} v{APP_VER}；配置文件 {data_path()}；日志 {log_file()}")
         append_log(f"权限：本工具{'已' if self.is_admin else '未'}提权")
         if self._kw_fixed:
-            self.log("目标窗口关键字原本指向本工具自身，已重置为「Vice City」。"
-                     "正确做法：切到游戏停 1 秒，再点「拾取当前窗口」。", "warn")
+            self.log("目标窗口关键字原本指向本工具自身，已重置为「Vice City」。正确做法：切到游戏停 1 秒，再点「拾取当前窗口」。", "warn")
         if self.load_warning:
             self.log("⚠ " + self.load_warning, "warn")
-            self.root.after(300, lambda: messagebox.showwarning(
-                "配置文件已隔离", self.load_warning + "\n\n可从「从备份恢复」找回上一版配置。",
-                parent=self.root))
+            self.root.after(
+                300,
+                lambda: messagebox.showwarning(
+                    "配置文件已隔离", self.load_warning + "\n\n可从「从备份恢复」找回上一版配置。", parent=self.root
+                ),
+            )
 
     # -- 外观 ---------------------------------------------------------------
     def _make_vars(self):
@@ -1731,8 +1935,7 @@ class CheatApp:
     def _on_unmap(self, _event=None):
         """用户点了任务栏/标题栏的「最小化」→ 收进托盘（withdraw 不触发本回调二次入托）。"""
         try:
-            if self.root.state() == "iconic" and self.tray.available \
-                    and self.settings.get("close_to_tray", True):
+            if self.root.state() == "iconic" and self.tray.available and self.settings.get("close_to_tray", True):
                 self.root.withdraw()
                 self._tray_hint_once()
         except Exception:
@@ -1741,8 +1944,44 @@ class CheatApp:
     def _tray_hint_once(self):
         if not self._tray_hinted:
             self._tray_hinted = True
-            self.log("已最小化到托盘：点托盘图标恢复，右键可退出"
-                     "（设置 → 常规 可改回「关闭即退出」）。", "info")
+            self.log("已最小化到托盘：点托盘图标恢复，右键可退出（设置 → 常规 可改回「关闭即退出」）。", "info")
+
+    def _theme_track(self, widget, **option_keys):
+        """登记内容区控件的配色选项 → C 键，主题切换时统一重刷。
+
+        Tk 控件只在构造时读取颜色值，`C` 原地更新不会自动生效，故需要这张注册表。
+        """
+        for option, key in option_keys.items():
+            self._content_theme.append((widget, option, key))
+        return widget
+
+    def _apply_content_theme(self):
+        """按当前 `C` 重刷已登记的内容区控件与列表 tag 配色。"""
+        alive = []
+        for widget, option, key in self._content_theme:
+            try:
+                widget.configure(**{option: C[key]})
+            except tk.TclError:  # 控件已销毁（如重建 UI / 测试）
+                continue
+            alive.append((widget, option, key))
+        self._content_theme = alive
+        tree = getattr(self, "tree", None)
+        if tree is not None:
+            try:
+                tree.tag_configure("odd", background=C["bg"])
+                tree.tag_configure("conflict", foreground=C["warn"])
+                tree.tag_configure("unbound", foreground=C["muted"])
+                tree.tag_configure("unverified", foreground=C["muted"])
+            except tk.TclError:
+                pass
+        log = getattr(self, "txt_log", None)
+        if log is not None:
+            try:
+                log.tag_configure("ok", foreground=C["ok"])
+                log.tag_configure("warn", foreground=C["warn"])
+                log.tag_configure("info", foreground=C["text"])
+            except tk.TclError:
+                pass
 
     def _setup_style(self, reset_geometry: bool = True):
         self.ui = ui_scale(self.root)
@@ -1766,24 +2005,31 @@ class CheatApp:
         style.configure("TFrame", background=C["bg"])
         style.configure("Panel.TFrame", background=C["panel"])
         style.configure("TLabel", background=C["bg"], foreground=C["text"])
-        style.configure("Muted.TLabel", background=C["bg"], foreground=C["muted"],
-                        font=("Microsoft YaHei UI", 9))
-        style.configure("H1.TLabel", background=C["bg"], foreground=C["text"],
-                        font=("Microsoft YaHei UI", 15, "bold"))
+        style.configure("Muted.TLabel", background=C["bg"], foreground=C["muted"], font=("Microsoft YaHei UI", 9))
+        style.configure("H1.TLabel", background=C["bg"], foreground=C["text"], font=("Microsoft YaHei UI", 15, "bold"))
         style.configure("TButton", padding=(10, 5))
-        style.configure("Accent.TButton", padding=(14, 6), background=C["accent"],
-                        foreground="#ffffff", borderwidth=0)
-        style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("pressed", "#1e40af")])
-        style.configure("Danger.TButton", padding=(12, 5), background="#dc2626",
-                        foreground="#ffffff", borderwidth=0)
+        style.configure("Accent.TButton", padding=(14, 6), background=C["accent"], foreground="#ffffff", borderwidth=0)
+        style.map("Accent.TButton", background=[("active", _shade(C["accent"], 0.88)), ("pressed", _shade(C["accent"], 0.74))])
+        style.configure("Danger.TButton", padding=(12, 5), background="#dc2626", foreground="#ffffff", borderwidth=0)
         style.map("Danger.TButton", background=[("active", "#b91c1c"), ("pressed", "#991b1b")])
-        style.configure("Treeview", background=C["panel"], fieldbackground=C["panel"],
-                        foreground=C["text"], rowheight=int(27 * self.ui), borderwidth=0,
-                        font=("Microsoft YaHei UI", 10))
-        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 9, "bold"),
-                        background="#eef1f6", foreground="#374151", relief="flat", padding=(6, 6))
-        style.map("Treeview", background=[("selected", "#dbe7ff")],
-                  foreground=[("selected", C["text"])])
+        style.configure(
+            "Treeview",
+            background=C["panel"],
+            fieldbackground=C["panel"],
+            foreground=C["text"],
+            rowheight=int(27 * self.ui),
+            borderwidth=0,
+            font=("Microsoft YaHei UI", 10),
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            background=C["soft"],
+            foreground=C["text"],
+            relief="flat",
+            padding=(6, 6),
+        )
+        style.map("Treeview", background=[("selected", C["soft"])], foreground=[("selected", C["text"])])
         style.configure("TCheckbutton", background=C["bg"])
         style.configure("TCombobox", padding=3)
         style.configure("TSpinbox", padding=3)
@@ -1797,10 +2043,14 @@ class CheatApp:
         if self.nova_ui:
             self.command_registry = default_commands(self)
             self.shell = NovaShell(
-                root, self, self.ui_tokens, self.command_registry,
+                root,
+                self,
+                self.ui_tokens,
+                self.command_registry,
                 on_command_panel=self.open_command_palette,
                 on_theme=self.toggle_theme,
-                title=f"{APP_NAME}  ·  Nova")
+                title=f"{APP_NAME}  ·  Nova",
+            )
             content_host = self.shell.content_host
         outer = ttk.Frame(content_host, padding=(16, 14, 16, 10))
         outer.pack(fill="both", expand=True)
@@ -1808,8 +2058,7 @@ class CheatApp:
         head = ttk.Frame(outer)
         head.pack(fill="x")
         ttk.Label(head, text=APP_NAME, style="H1.TLabel").pack(side="left")
-        ttk.Label(head, text=f"  v{APP_VER} · 快捷键触发 · 自动键盘输入 · 前台校验",
-                  style="Muted.TLabel").pack(side="left", pady=(6, 0))
+        ttk.Label(head, text=f"  v{APP_VER} · 快捷键触发 · 自动键盘输入 · 前台校验", style="Muted.TLabel").pack(side="left", pady=(6, 0))
         self.btn_pause = ttk.Button(head, text="⏸ 暂停热键", width=12, command=self.toggle_pause)
         self.btn_pause.pack(side="right", pady=(2, 0))
         self.lbl_state = ttk.Label(head, text="初始化…", style="Muted.TLabel")
@@ -1817,50 +2066,60 @@ class CheatApp:
         self.lbl_game = ttk.Label(head, text="⚪ 检测游戏…", style="Muted.TLabel")
         self.lbl_game.pack(side="right", pady=(6, 0), padx=(0, 16))
         # 权限不匹配时才出现：UIPI 会静默拦掉注入，必须给一个一键修复的入口
-        self.btn_admin = ttk.Button(head, text="⚠ 以管理员身份重启", style="Danger.TButton",
-                                    command=self.relaunch_as_admin)
+        self.btn_admin = ttk.Button(head, text="⚠ 以管理员身份重启", style="Danger.TButton", command=self.relaunch_as_admin)
 
         # 工具条（1.8 收敛：只留常用项，其余进「设置」对话框）
-        bar = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
-                       highlightbackground=C["line"], padx=12, pady=8)
+        bar = self._theme_track(
+            tk.Frame(outer, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"], padx=12, pady=8),
+            bg="panel",
+            highlightbackground="line",
+        )
         bar.pack(fill="x", pady=(12, 10))
         lbl = dict(bg=C["panel"], fg=C["muted"], font=("Microsoft YaHei UI", 9))
 
-        tk.Label(bar, text="方案", **lbl).pack(side="left")
+        self._theme_track(tk.Label(bar, text="方案", **lbl), bg="panel", fg="muted").pack(side="left")
         self.var_profile = tk.StringVar(value=self.active_profile)
-        self.cbo_profile = ttk.Combobox(bar, textvariable=self.var_profile, width=12,
-                                        state="readonly")
+        self.cbo_profile = ttk.Combobox(bar, textvariable=self.var_profile, width=12, state="readonly")
         self.cbo_profile.pack(side="left", padx=(6, 0))
         self.cbo_profile.bind("<<ComboboxSelected>>", self.switch_profile)
         self.lbl_autoswitch = ttk.Label(bar, text="", style="Muted.TLabel")
         self.lbl_autoswitch.pack(side="left", padx=(14, 0))
 
         ttk.Button(bar, text="⚙ 设置…", command=self.open_settings).pack(side="right")
-        ttk.Button(bar, text="⌨ 热键总览", command=self.open_hotkey_overview)\
-            .pack(side="right", padx=(0, 8))
-        ttk.Button(bar, text="↻ 重新注册快捷键", command=self.apply_hotkeys)\
-            .pack(side="right", padx=(0, 8))
+        ttk.Button(bar, text="⌨ 热键总览", command=self.open_hotkey_overview).pack(side="right", padx=(0, 8))
+        ttk.Button(bar, text="↻ 重新注册快捷键", command=self.apply_hotkeys).pack(side="right", padx=(0, 8))
 
         # 搜索（与分组筛选叠加生效）
-        srow = tk.Frame(outer, bg=C["bg"])
+        srow = self._theme_track(tk.Frame(outer, bg=C["bg"]), bg="bg")
         srow.pack(fill="x", pady=(0, 8))
-        tk.Label(srow, text="搜索", bg=C["bg"], fg=C["muted"],
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self._theme_track(tk.Label(srow, text="搜索", bg=C["bg"], fg=C["muted"], font=("Microsoft YaHei UI", 9)), bg="bg", fg="muted").pack(
+            side="left"
+        )
         self.var_search = tk.StringVar()
-        self.ent_search = tk.Entry(srow, textvariable=self.var_search, font=("Microsoft YaHei UI", 10),
-                                   relief="flat", bg="#ffffff", highlightthickness=1,
-                                   highlightbackground=C["line"], highlightcolor=C["accent"], width=34)
+        self.ent_search = tk.Entry(
+            srow,
+            textvariable=self.var_search,
+            font=("Microsoft YaHei UI", 10),
+            relief="flat",
+            bg=C["panel"],
+            highlightthickness=1,
+            highlightbackground=C["line"],
+            highlightcolor=C["accent"],
+            width=34,
+            insertbackground=C["text"],
+        )
+        self._theme_track(self.ent_search, bg="panel", highlightbackground="line", highlightcolor="accent", insertbackground="text")
         self.ent_search.pack(side="left", ipady=3, padx=(8, 8))
         self.ent_search.bind("<KeyRelease>", lambda e: self.refresh_tree())
         self.lbl_count = ttk.Label(srow, text="", style="Muted.TLabel")
         self.lbl_count.pack(side="left")
         ttk.Button(srow, text="清空", width=5, command=self.clear_search).pack(side="left", padx=(10, 0))
 
-        tk.Label(srow, text="分组", bg=C["bg"], fg=C["muted"],
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(16, 0))
+        self._theme_track(tk.Label(srow, text="分组", bg=C["bg"], fg=C["muted"], font=("Microsoft YaHei UI", 9)), bg="bg", fg="muted").pack(
+            side="left", padx=(16, 0)
+        )
         self.var_group_filter = tk.StringVar(value="全部")
-        self.cbo_group = ttk.Combobox(srow, textvariable=self.var_group_filter, width=12,
-                                      state="readonly")
+        self.cbo_group = ttk.Combobox(srow, textvariable=self.var_group_filter, width=12, state="readonly")
         self.cbo_group.pack(side="left", padx=(6, 0))
         self.cbo_group.bind("<<ComboboxSelected>>", lambda e: self.refresh_tree())
 
@@ -1889,23 +2148,31 @@ class CheatApp:
         if self.settings.get("check_updates", False):
             more.add_command(label="检查更新…", command=self.check_updates)
         mb.configure(menu=more)
-        self.menu_more = more         # 2.1：语言切换要能改菜单文案
+        self.menu_more = more  # 2.1：语言切换要能改菜单文案
 
         # 列表
-        list_wrap = tk.Frame(outer, bg=C["panel"], highlightthickness=1,
-                             highlightbackground=C["line"])
+        list_wrap = self._theme_track(
+            tk.Frame(outer, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"]), bg="panel", highlightbackground="line"
+        )
         list_wrap.pack(fill="both", expand=True)
 
         cols = ("idx", "name", "code", "hotkey", "state", "count", "last", "note")
         self.tree = ttk.Treeview(list_wrap, columns=cols, show="headings", selectmode="extended")
-        headings = {"idx": ("#", 36, "center"), "name": ("名称", 148, "w"),
-                    "code": ("秘籍代码", 190, "w"), "hotkey": ("快捷键", 114, "center"),
-                    "state": ("状态", 56, "center"), "count": ("次数", 48, "center"),
-                    "last": ("最近", 96, "center"), "note": ("备注", 250, "w")}
+        headings = {
+            "idx": ("#", 36, "center"),
+            "name": ("名称", 148, "w"),
+            "code": ("秘籍代码", 190, "w"),
+            "hotkey": ("快捷键", 114, "center"),
+            "state": ("状态", 56, "center"),
+            "count": ("次数", 48, "center"),
+            "last": ("最近", 96, "center"),
+            "note": ("备注", 250, "w"),
+        }
         for key, (text, width, anchor) in headings.items():
             self.tree.heading(key, text=text)
-            self.tree.column(key, width=int(width * self.ui), minwidth=int(width * self.ui * 0.6),
-                             anchor=anchor, stretch=(key in ("name", "note")))
+            self.tree.column(
+                key, width=int(width * self.ui), minwidth=int(width * self.ui * 0.6), anchor=anchor, stretch=(key in ("name", "note"))
+            )
         self._sort_key, self._sort_desc = "count", True
         self.tree.heading("count", text="次数 ↓", command=lambda: self.sort_by("count"))
         self.tree.heading("last", text="最近", command=lambda: self.sort_by("last"))
@@ -1914,13 +2181,13 @@ class CheatApp:
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
-        self.tree.tag_configure("odd", background="#fbfcfe")
+        self.tree.tag_configure("odd", background=C["bg"])
         self.tree.tag_configure("conflict", foreground=C["warn"])
-        self.tree.tag_configure("unbound", foreground="#98a2b3")
-        self.tree.tag_configure("unverified", foreground="#94a3b8")  # 1.9 未实机验证
+        self.tree.tag_configure("unbound", foreground=C["muted"])
+        self.tree.tag_configure("unverified", foreground=C["muted"])  # 1.9 未实机验证
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
         self.tree.bind("<Return>", lambda e: self.send_selected())
-        self.tree.bind("<Home>", lambda e: self._select_edge(0))    # 1.8-G 键盘全导航
+        self.tree.bind("<Home>", lambda e: self._select_edge(0))  # 1.8-G 键盘全导航
         self.tree.bind("<End>", lambda e: self._select_edge(-1))
         self.tree.bind("<Button-3>", self._popup_row_menu)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_hint())
@@ -1941,8 +2208,7 @@ class CheatApp:
         # 操作区
         ops = ttk.Frame(outer)
         ops.pack(fill="x", pady=(10, 0))
-        self.btn_send = ttk.Button(ops, text="▶ 发送所选 (Enter)", style="Accent.TButton",
-                                   command=self.on_send_button)
+        self.btn_send = ttk.Button(ops, text="▶ 发送所选 (Enter)", style="Accent.TButton", command=self.on_send_button)
         self.btn_send.pack(side="left")
         ttk.Button(ops, text="添加", command=self.add_cheat).pack(side="left", padx=(8, 0))
         ttk.Button(ops, text="编辑", command=self.edit_selected).pack(side="left", padx=(6, 0))
@@ -1954,13 +2220,27 @@ class CheatApp:
         ttk.Button(ops, text="恢复默认", command=self.reset_defaults).pack(side="right", padx=(0, 14))
 
         # 日志
-        self.txt_log = tk.Text(outer, height=5, bg="#0f172a", fg="#cbd5e1", relief="flat",
-                               font=("Consolas", 9), padx=10, pady=6, wrap="word",
-                               insertbackground="#cbd5e1")
+        self.txt_log = self._theme_track(
+            tk.Text(
+                outer,
+                height=5,
+                bg=C["bg"],
+                fg=C["text"],
+                relief="flat",
+                font=("Consolas", 9),
+                padx=10,
+                pady=6,
+                wrap="word",
+                insertbackground=C["text"],
+            ),
+            bg="bg",
+            fg="text",
+            insertbackground="text",
+        )
         self.txt_log.pack(fill="x", pady=(10, 0))
-        self.txt_log.tag_configure("ok", foreground="#6ee7b7")
-        self.txt_log.tag_configure("warn", foreground="#fca5a5")
-        self.txt_log.tag_configure("info", foreground="#cbd5e1")
+        self.txt_log.tag_configure("ok", foreground=C["ok"])
+        self.txt_log.tag_configure("warn", foreground=C["warn"])
+        self.txt_log.tag_configure("info", foreground=C["text"])
         self.txt_log.configure(state="disabled")
         self.lbl_hint = ttk.Label(outer, text="", style="Muted.TLabel")
         self.lbl_hint.pack(fill="x", pady=(6, 0))
@@ -1976,8 +2256,7 @@ class CheatApp:
         self.root.bind("<Escape>", lambda e: self._on_escape())
 
         # 2.1：UI 建成后统一套用语言（纯后处理，不改控件结构 / Tab 顺序）
-        apply_locale_to_widgets(self.root, menus=(self.menu_row, self.menu_batch,
-                                                   self.menu_more))
+        apply_locale_to_widgets(self.root, menus=(self.menu_row, self.menu_batch, self.menu_more))
 
     def _select_edge(self, which: int):
         """1.8-G：Home / End 跳到列表首尾（↑↓ 选中、Enter 发送沿用既有行为）。"""
@@ -2073,9 +2352,7 @@ class CheatApp:
             hwnd, _title, exe = self.game_info
             self.game_is_admin = process_elevated(window_pid(hwnd)) if hwnd else None
             if hwnd and self.permission_blocks_input():
-                self.lbl_game.configure(
-                    text=f"🔴 游戏以管理员运行 → 按键会被拦截（{exe or '未知进程'}）",
-                    foreground=C["warn"])
+                self.lbl_game.configure(text=f"🔴 游戏以管理员运行 → 按键会被拦截（{exe or '未知进程'}）", foreground=C["warn"])
                 self._show_admin_button(True)
             elif hwnd:
                 self.lbl_game.configure(text=f"🟢 游戏运行中：{exe or '未知进程'}", foreground=C["ok"])
@@ -2095,12 +2372,9 @@ class CheatApp:
         if not self.shell:
             return
         game_ok = bool(self.game_info and self.game_info[0])
-        self._nova_status("game", "游戏 ● 已检测" if game_ok else "游戏 ● 未检测",
-                          "ok" if game_ok else "idle")
+        self._nova_status("game", "游戏 ● 已检测" if game_ok else "游戏 ● 未检测", "ok" if game_ok else "idle")
         bad = len(self.conflicts or {})
-        self._nova_status("hotkeys",
-                          "热键 ● 全部就绪" if not bad else f"热键 ● {bad} 个冲突",
-                          "ok" if not bad else "warn")
+        self._nova_status("hotkeys", "热键 ● 全部就绪" if not bad else f"热键 ● {bad} 个冲突", "ok" if not bad else "warn")
         self._nova_status("config", f"配置 ● {read_data_mode()} / {self.ui_theme}")
         self._nova_status("locale", "中文 ●" if get_locale() == "zh" else "EN ●")
 
@@ -2151,8 +2425,9 @@ class CheatApp:
             if rule["profile"] not in names:
                 if rule["name"] not in self._switch_warned:
                     self._switch_warned.add(rule["name"])
-                    self.log(f"⚠ 自动切换规则「{rule['name']}」指向不存在的方案"
-                             f"「{rule['profile']}」，已跳过。可在 设置 → 游戏 修正。", "warn")
+                    self.log(
+                        f"⚠ 自动切换规则「{rule['name']}」指向不存在的方案「{rule['profile']}」，已跳过。可在 设置 → 游戏 修正。", "warn"
+                    )
                 return
             key = (rule["name"], rule["profile"])
             if self._switch_pending and self._switch_pending[0] == key:
@@ -2212,12 +2487,15 @@ class CheatApp:
     def relaunch(self):
         """2.1：普通重启（切换数据目录 / 界面语言后让新设置生效）。"""
         import subprocess
+
         try:
             if getattr(sys, "frozen", False):
                 base = [sys.executable]
             else:
                 base = [sys.executable, os.path.abspath(sys.argv[0])]
-            args = base + [a for a in sys.argv[1:] if not a.startswith("--")]
+            # 重启只保留数据目录开关：UI 形态/诊断类参数是一次性的，不应带进新进程
+            keep = {"--portable", "--userdata"}
+            args = base + [a for a in sys.argv[1:] if a in keep]
             subprocess.Popen(args, close_fds=True)
             append_log("已请求普通重启（语言 / 数据目录切换生效）")
             self.on_close(force=True)
@@ -2236,10 +2514,11 @@ class CheatApp:
             rc = shell_execute_runas(exe, params, os.getcwd())
             if rc > 32:
                 append_log("请求以管理员身份重启（UAC）")
-                self.on_close(force=True)   # 提权重启必须真退出，不能缩进托盘
+                self.on_close(force=True)  # 提权重启必须真退出，不能缩进托盘
             else:
-                messagebox.showwarning("提权失败", f"无法以管理员身份重启（代码 {rc}）。\n"
-                                       f"可手动右键 exe →「以管理员身份运行」。", parent=self.root)
+                messagebox.showwarning(
+                    "提权失败", f"无法以管理员身份重启（代码 {rc}）。\n可手动右键 exe →「以管理员身份运行」。", parent=self.root
+                )
         except Exception as exc:
             messagebox.showerror("提权失败", str(exc), parent=self.root)
 
@@ -2254,11 +2533,9 @@ class CheatApp:
         win.attributes("-topmost", True)
         bg = "#065f46" if kind == "ok" else "#7f1d1d"
         fg = "#ecfdf5" if kind == "ok" else "#fee2e2"
-        frm = tk.Frame(win, bg=bg, padx=18, pady=10,
-                       highlightthickness=1, highlightbackground="#334155")
+        frm = tk.Frame(win, bg=bg, padx=18, pady=10, highlightthickness=1, highlightbackground="#334155")
         frm.pack()
-        tk.Label(frm, text=text, bg=bg, fg=fg,
-                 font=("Microsoft YaHei UI", 11, "bold")).pack()
+        tk.Label(frm, text=text, bg=bg, fg=fg, font=("Microsoft YaHei UI", 11, "bold")).pack()
         win.update_idletasks()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()
@@ -2302,9 +2579,7 @@ class CheatApp:
             pass
 
     def clear_stats(self):
-        if not messagebox.askyesno("清空统计",
-                                   "将把「次数 / 最近使用 / 今日次数」全部归零，不影响秘籍与快捷键。继续？",
-                                   parent=self.root):
+        if not messagebox.askyesno("清空统计", "将把「次数 / 最近使用 / 今日次数」全部归零，不影响秘籍与快捷键。继续？", parent=self.root):
             return
         self.stats.clear()
         self.store["today"] = {"date": "", "count": 0}
@@ -2334,8 +2609,7 @@ class CheatApp:
         arrow = " ↓" if self._sort_desc else " ↑"
         for k, text in labels.items():
             self.tree.heading(k, text=text + (arrow if k == key else ""))
-        self.log(f"已按「{labels.get(key, key)}」{'降序' if self._sort_desc else '升序'}排序（快捷键跟着条目走）。",
-                 "info")
+        self.log(f"已按「{labels.get(key, key)}」{'降序' if self._sort_desc else '升序'}排序（快捷键跟着条目走）。", "info")
 
     # -- 列表渲染 ------------------------------------------------------------
     def _refresh_group_choices(self):
@@ -2368,20 +2642,23 @@ class CheatApp:
             elif not c.get("hotkey"):
                 state = "未绑定"
                 tags.append("unbound")
-            if not c.get("verified", True):       # 1.9-D 未实机验证模板
+            if not c.get("verified", True):  # 1.9-D 未实机验证模板
                 tags.append("unverified")
             entry = self.stats.get(c["code"], {})
             used = entry.get("count", 0)
             last = str(entry.get("last") or "")
             if len(last) >= 16:
-                last = last[5:]          # 去掉年份，保持列窄
+                last = last[5:]  # 去掉年份，保持列窄
             note = str(c.get("note") or "")
             if not c.get("verified", True):
                 note = "⚠ 未实机验证 · " + note
-            self.tree.insert("", "end", iid=c["id"], tags=tags,
-                             values=(i, c.get("name", ""), c.get("code", ""),
-                                     c.get("hotkey") or "—", state, used or "—",
-                                     last or "—", note))
+            self.tree.insert(
+                "",
+                "end",
+                iid=c["id"],
+                tags=tags,
+                values=(i, c.get("name", ""), c.get("code", ""), c.get("hotkey") or "—", state, used or "—", last or "—", note),
+            )
         if sel and self.tree.exists(sel):
             self.tree.selection_set(sel)
             self.tree.see(sel)
@@ -2437,12 +2714,10 @@ class CheatApp:
     def apply_hotkeys(self):
         """统一入口：先清冲突，再整体注销/重注册（暂停时只留暂停键）。"""
         self.conflicts.clear()
-        bindings, conflicts = build_bindings(
-            self.cheats, self.settings.get("pause_hotkey", ""), include_cheats=not self.paused)
+        bindings, conflicts = build_bindings(self.cheats, self.settings.get("pause_hotkey", ""), include_cheats=not self.paused)
         self.conflicts.update(conflicts)
         self.engine.apply(bindings)
-        self.lbl_state.configure(text=t("已暂停 · 仅暂停键生效…" if self.paused
-                                        else "注册快捷键…"))
+        self.lbl_state.configure(text=t("已暂停 · 仅暂停键生效…" if self.paused else "注册快捷键…"))
 
     def _on_hotkeys_applied(self, results: dict, id_map: dict):
         self.hotkey_owner = id_map
@@ -2460,7 +2735,7 @@ class CheatApp:
                 occupied.append(combo)
                 occupied_ids.append(cheat_id)
                 if combo:
-                    self._avoid.add(combo)   # 记住它真的被占着，后续自动分配不再选它
+                    self._avoid.add(combo)  # 记住它真的被占着，后续自动分配不再选它
             elif err == ERROR_ACCESS_DENIED:
                 self.conflicts[cheat_id] = "权限不足（目标程序可能以管理员运行）"
                 denied.append(combo)
@@ -2477,8 +2752,7 @@ class CheatApp:
         ok_count = sum(1 for ok, _ in cheat_results.values() if ok)
         cheat_conflicts = {k: v for k, v in self.conflicts.items() if k != PAUSE_ID}
         if PAUSE_ID in self.conflicts:
-            self.log(f"暂停键不可用：{self.conflicts[PAUSE_ID]}。"
-                     f"请换一个组合（如 Ctrl+Alt+Shift+P）。", "warn")
+            self.log(f"暂停键不可用：{self.conflicts[PAUSE_ID]}。请换一个组合（如 Ctrl+Alt+Shift+P）。", "warn")
         if self.paused:
             self.lbl_state.configure(text=t(f"⏸ 已暂停（{pause_combo} 恢复）"))
         elif cheat_conflicts:
@@ -2488,8 +2762,7 @@ class CheatApp:
                 c = self.by_id(cid)
                 self.log(f"快捷键冲突：{c['name'] if c else cid} — {reason}", "warn")
             if occupied:
-                self.log("提示：被占用的组合键通常是输入法、显卡/录屏软件或另一个同类工具占着，"
-                         "双击该行换成别的键即可。", "info")
+                self.log("提示：被占用的组合键通常是输入法、显卡/录屏软件或另一个同类工具占着，双击该行换成别的键即可。", "info")
             if denied:
                 self.log("提示：权限不足 → 请右键本工具以管理员身份运行一次。", "warn")
         else:
@@ -2513,9 +2786,9 @@ class CheatApp:
             self.tree.selection_set(row)
         try:
             n = len(self.selected_ids())
-            self.menu_row.entryconfigure(self.menu_row.index("end"),
-                                         label=f"批量操作（已选 {n} 条）" if n > 1
-                                         else "批量操作（选中多条时可用）")
+            self.menu_row.entryconfigure(
+                self.menu_row.index("end"), label=f"批量操作（已选 {n} 条）" if n > 1 else "批量操作（选中多条时可用）"
+            )
             self.menu_row.tk_popup(event.x_root, event.y_root)
         finally:
             self.menu_row.grab_release()
@@ -2534,9 +2807,9 @@ class CheatApp:
         if not cid or not self.by_id(cid):
             return
         if not self._assign_free_combos([cid], 0):
-            messagebox.showinfo("没有空闲键",
-                                "候选组合键（F1–F11 及 Shift/Ctrl/Ctrl+Shift/Alt 组合）都已被占用，"
-                                "请双击该行手动指定一个。", parent=self.root)
+            messagebox.showinfo(
+                "没有空闲键", "候选组合键（F1–F11 及 Shift/Ctrl/Ctrl+Shift/Alt 组合）都已被占用，请双击该行手动指定一个。", parent=self.root
+            )
 
     def auto_fix_conflicts(self):
         ids = [cid for cid in self.conflicts if cid != PAUSE_ID and self.by_id(cid)]
@@ -2558,10 +2831,9 @@ class CheatApp:
             if not c:
                 continue
             avoid = list(self._avoid)
-            if cid in self.conflicts:      # 已知有问题的键必须换掉，不能原地打转
+            if cid in self.conflicts:  # 已知有问题的键必须换掉，不能原地打转
                 avoid.append(c.get("hotkey") or "")
-            combo = pick_free_combo(self.cheats, self.settings.get("pause_hotkey", ""),
-                                    avoid, exclude_id=cid)
+            combo = pick_free_combo(self.cheats, self.settings.get("pause_hotkey", ""), avoid, exclude_id=cid)
             if not combo:
                 break
             if combo == (c.get("hotkey") or ""):
@@ -2600,7 +2872,7 @@ class CheatApp:
         else:
             self.btn_pause.configure(text=t("⏸ 暂停热键"), style="TButton")
         try:
-            self.tray.update_tip(self.paused)   # 托盘悬停文字同步暂停态
+            self.tray.update_tip(self.paused)  # 托盘悬停文字同步暂停态
         except Exception:
             pass
 
@@ -2635,8 +2907,7 @@ class CheatApp:
         now = time.time()
         last = self._last_send.get(cid, 0.0)
         if gap_ms and now - last < gap_ms / 1000.0:
-            self.log(f"↺ 忽略连击：「{cheat.get('name', '')}」{int((now - last) * 1000)}ms 内重复触发",
-                     "info")
+            self.log(f"↺ 忽略连击：「{cheat.get('name', '')}」{int((now - last) * 1000)}ms 内重复触发", "info")
             return
 
         if not self.sending.acquire(blocking=False):
@@ -2693,13 +2964,12 @@ class CheatApp:
     def _read_params(self, force: bool) -> dict:
         target_hwnd = user32.GetForegroundWindow() or 0
         is_test = bool(target_hwnd) and target_hwnd == self.test_hwnd
-        t = self._active_target or {}       # 2.0：目标规则解析结果，缺省空 = 旧行为
+        t = self._active_target or {}  # 2.0：目标规则解析结果，缺省空 = 旧行为
         return {
             "interval": max(10, int(self.var_delay.get() or 45)),
             "pre": max(0, int(self.settings.get("pre_delay_ms", 180))),
             "keywords": [k.strip().lower() for k in (self.var_kw.get() or "").split(",") if k.strip()],
-            "check_fg": ((not force) and bool(self.var_fg.get())
-                         and bool(t.get("require_foreground", True)) and not is_test),
+            "check_fg": ((not force) and bool(self.var_fg.get()) and bool(t.get("require_foreground", True)) and not is_test),
             "release_mods": bool(self.settings.get("release_modifiers", True)),
             "uppercase": bool(self.settings.get("uppercase", False)),
             "disable_ime": bool(t.get("disable_ime", self.settings.get("disable_ime", True))),
@@ -2720,42 +2990,54 @@ class CheatApp:
         # 单条覆盖优先（1.6）：0 = 跟随全局
         interval = _safe_int(cheat.get("interval_ms"), 0, 20, 300) or params["interval"]
         # 2.0 策略引擎：默认 fixed 且所有覆盖值为 None → 与 1.9.1 参数逐项一致
-        named = self.settings.get("strategies") or {}
+        # 策略表在 store 顶层（store["strategies"]），不随 settings 白名单持久化
+        named = self.store.get("strategies") or {}
         strategy = resolve_strategy(named, cheat)
         ref = params.get("strategy_ref")
         if ref and not cheat.get("strategy") and ref in named:
-            strategy = normalize_strategy(named[ref])   # 目标规则引用的具名策略
+            strategy = normalize_strategy(named[ref])  # 目标规则引用的具名策略
         sp = plan_send(strategy, code, interval, params["pre"], params["uppercase"])
         t0 = time.perf_counter()
 
         def history(result: str, detail: str):
             """1.8-I：只往队列投一条纯数据记录，绝不在这里碰 store / Tk。"""
-            self.events.put(("history", {
-                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "name": name, "code": code, "profile": self.active_profile,
-                "elapsed": round(time.perf_counter() - t0, 3),
-                "result": result, "detail": detail,
-            }))
+            self.events.put(
+                (
+                    "history",
+                    {
+                        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "name": name,
+                        "code": code,
+                        "profile": self.active_profile,
+                        "elapsed": round(time.perf_counter() - t0, 3),
+                        "result": result,
+                        "detail": detail,
+                    },
+                )
+            )
 
         sent = 0
         try:
             # 权限不匹配时 SendInput 会"成功但不生效"，是最难自查的失败模式：必须提前拦下并说明
             if self._permission_mismatch_live():
-                msg = ("⚠ 游戏以管理员身份运行，本工具不是：Windows 会**静默丢弃**注入的按键"
-                       "（SendInput 仍报成功，所以看起来毫无反应）。"
-                       "请点右上角「以管理员身份重启」，或右键 exe →「以管理员身份运行」。")
+                msg = (
+                    "⚠ 游戏以管理员身份运行，本工具不是：Windows 会**静默丢弃**注入的按键"
+                    "（SendInput 仍报成功，所以看起来毫无反应）。"
+                    "请点右上角「以管理员身份重启」，或右键 exe →「以管理员身份运行」。"
+                )
                 self.log(msg, "warn", from_thread=True)
                 self.events.put(("toast", "⚠ 权限不匹配：请以管理员身份重启工具", "warn"))
-                append_log(f"SEND fail code={code} reason=uipi_blocked "
-                           f"game_admin=1 self_admin=0", "WARN")
+                append_log(f"SEND fail code={code} reason=uipi_blocked game_admin=1 self_admin=0", "WARN")
                 history("fail", "权限不匹配（UIPI 静默拦截）")
                 return
 
             if check_fg and not self._fg_ok(params["keywords"]):
                 title, _ = foreground_info()
-                msg = (f"⚠ 前台窗口不是目标游戏（当前：{title or '未知'}；"
-                       f"目标关键字：{'、'.join(params['keywords']) or '未设置'}），本次未发送。"
-                       f"点「拾取当前窗口」或关闭前台校验。")
+                msg = (
+                    f"⚠ 前台窗口不是目标游戏（当前：{title or '未知'}；"
+                    f"目标关键字：{'、'.join(params['keywords']) or '未设置'}），本次未发送。"
+                    f"点「拾取当前窗口」或关闭前台校验。"
+                )
                 self.log(msg, "warn", from_thread=True)
                 self.events.put(("toast", f"⚠ 未在前台：{title or '未知窗口'}", "warn"))
                 append_log(f"SEND fail code={code} reason=not_foreground title={title!r}", "WARN")
@@ -2778,14 +3060,15 @@ class CheatApp:
             with ImeGuard(target_hwnd, params["disable_ime"]):
                 while True:
                     remaining = code[sent_total:]
-                    sp = plan_send(strategy, remaining, interval, params["pre"],
-                                   params["uppercase"], attempt)
+                    sp = plan_send(strategy, remaining, interval, params["pre"], params["uppercase"], attempt)
                     try:
                         sent = type_text(
-                            sp, self._stop,
-                            send_key=send_key, sleep=time.sleep, lookup_vk=vk_for_char,
-                            check_target=(lambda: user32.GetForegroundWindow() == target_hwnd)
-                            if check_fg else None,
+                            sp,
+                            self._stop,
+                            send_key=send_key,
+                            sleep=time.sleep,
+                            lookup_vk=vk_for_char,
+                            check_target=(lambda: user32.GetForegroundWindow() == target_hwnd) if check_fg else None,
                         )
                         sent_total += sent
                         break
@@ -2796,8 +3079,7 @@ class CheatApp:
                         if not should_retry(strategy, attempt, sent_total, total):
                             raise
                         attempt += 1
-                        self.log(f"⟳ 自适应重试 {attempt}：已发 {sent_total}/{total}，"
-                                 f"间隔自动加长…", "warn", from_thread=True)
+                        self.log(f"⟳ 自适应重试 {attempt}：已发 {sent_total}/{total}，间隔自动加长…", "warn", from_thread=True)
             sent = sent_total
 
             elapsed = time.perf_counter() - t0
@@ -2808,21 +3090,17 @@ class CheatApp:
             history("ok", f"已发 {sent}/{total} 字符")
         except SendCancelled as exc:
             elapsed = time.perf_counter() - t0
-            self.log(f"⏹ 已停止「{name}」：发到第 {exc.sent}/{exc.total} 个字符。", "warn",
-                     from_thread=True)
+            self.log(f"⏹ 已停止「{name}」：发到第 {exc.sent}/{exc.total} 个字符。", "warn", from_thread=True)
             self.events.put(("toast", f"⏹ 已停止 {exc.sent}/{exc.total}", "warn"))
-            append_log(f"SEND cancel code={code} sent={exc.sent}/{exc.total} "
-                       f"elapsed={elapsed:.3f}s", "WARN")
+            append_log(f"SEND cancel code={code} sent={exc.sent}/{exc.total} elapsed={elapsed:.3f}s", "WARN")
             history("cancel", f"停在第 {exc.sent}/{exc.total} 字符")
         except SendError as exc:
             self.log(f"⚠ {exc.reason}（已发 {exc.sent}/{exc.total}）", "warn", from_thread=True)
             self.events.put(("toast", f"⚠ {exc.reason}", "warn"))
-            append_log(f"SEND fail code={code} reason={exc.reason} "
-                       f"sent={exc.sent}/{exc.total}", "WARN")
+            append_log(f"SEND fail code={code} reason={exc.reason} sent={exc.sent}/{exc.total}", "WARN")
             history("fail", f"{exc.reason}（已发 {exc.sent}/{exc.total}）")
         except OSError as exc:
-            self.log(f"✖ 键盘注入失败：{exc}（若游戏以管理员运行，请同样以管理员运行本工具）",
-                     "warn", from_thread=True)
+            self.log(f"✖ 键盘注入失败：{exc}（若游戏以管理员运行，请同样以管理员运行本工具）", "warn", from_thread=True)
             append_log(f"SEND fail code={code} reason=oserror {exc}", "WARN")
             history("fail", f"键盘注入失败：{exc}")
         except Exception as exc:
@@ -2833,19 +3111,16 @@ class CheatApp:
             self.events.put(("send_done", cid))
             self.sending.release()
             # 2.0 后置钩子：成功与所有失败路径都会走到这里（幂等由钩子自身保证）
-            self.hooks.fire_after({"code": code, "profile": self.active_profile,
-                                   "sent": sent, "total": total})
+            self.hooks.fire_after({"code": code, "profile": self.active_profile, "sent": sent, "total": total})
 
     @staticmethod
     def _log_send_quality(code: str, sent: int, total: int, sp: SendParams, elapsed: float):
         """记录计划时长与实际时长；偏差过大说明节奏被系统拖慢（游戏卡 / CPU 忙）。"""
         planned = (sp.pre_delay_ms + total * sp.interval_ms) / 1000.0
         dev = (elapsed - planned) / planned if planned > 0 else 0.0
-        append_log(f"SEND ok code={code} sent={sent}/{total} planned={planned:.3f}s "
-                   f"actual={elapsed:.3f}s dev={dev:+.0%}")
+        append_log(f"SEND ok code={code} sent={sent}/{total} planned={planned:.3f}s actual={elapsed:.3f}s dev={dev:+.0%}")
         if abs(dev) > 0.15:
-            append_log(f"SEND WARN 节奏偏差 {dev:+.0%}（计划 {planned:.3f}s / "
-                       f"实际 {elapsed:.3f}s），若出现丢字请调大间隔", "WARN")
+            append_log(f"SEND WARN 节奏偏差 {dev:+.0%}（计划 {planned:.3f}s / 实际 {elapsed:.3f}s），若出现丢字请调大间隔", "WARN")
 
     # -- 增删改 -------------------------------------------------------------
     def add_cheat(self):
@@ -2888,8 +3163,7 @@ class CheatApp:
             return
         if not messagebox.askyesno("删除秘籍", f"确定删除「{c['name']}」？", parent=self.root):
             return
-        self._undo = {"kind": "cheat", "profile": self.active_profile,
-                      "index": self.cheats.index(c), "cheat": dict(c)}
+        self._undo = {"kind": "cheat", "profile": self.active_profile, "index": self.cheats.index(c), "cheat": dict(c)}
         self.cheats.remove(c)
         self.persist()
         self.refresh_tree()
@@ -2972,11 +3246,9 @@ class CheatApp:
             self.refresh_tree()
 
     def reset_defaults(self):
-        if not messagebox.askyesno("恢复默认",
-                                   "将用内置的 28 条常用秘籍替换当前方案，自定义内容会丢失。继续？",
-                                   parent=self.root):
+        if not messagebox.askyesno("恢复默认", "将用内置的 28 条常用秘籍替换当前方案，自定义内容会丢失。继续？", parent=self.root):
             return
-        fresh = template_cheats(DEFAULT_GAME)   # 1.9：带上 verified / game 字段
+        fresh = template_cheats(DEFAULT_GAME)  # 1.9：带上 verified / game 字段
         self.cheats[:] = fresh  # 原地替换，保持与 store 内列表的引用关系
         self.persist()
         self.refresh_tree()
@@ -3007,9 +3279,7 @@ class CheatApp:
         self.log(f"已切换到方案「{name}」（{len(self.cheats)} 条，快捷键已重新注册）。", "ok")
 
     def new_profile(self):
-        name = simpledialog.askstring("新建方案", "方案名称：",
-                                      initialvalue=f"方案 {len(self.store['profiles']) + 1}",
-                                      parent=self.root)
+        name = simpledialog.askstring("新建方案", "方案名称：", initialvalue=f"方案 {len(self.store['profiles']) + 1}", parent=self.root)
         if not name:
             return
         name = name.strip()
@@ -3020,8 +3290,7 @@ class CheatApp:
             return
         copy = [dict(c) for c in self.cheats]
         current = next((p for p in self.store["profiles"] if p["name"] == self.active_profile), {})
-        self.store["profiles"].append({"name": name, "cheats": copy,
-                                       "game": current.get("game") or DEFAULT_GAME})
+        self.store["profiles"].append({"name": name, "cheats": copy, "game": current.get("game") or DEFAULT_GAME})
         self.persist()
         self.var_profile.set(name)
         self.switch_profile()
@@ -3029,11 +3298,9 @@ class CheatApp:
 
     def rename_profile(self):
         if self.active_profile == "默认":
-            messagebox.showinfo("不可重命名", "内置「默认」方案请用「新建副本」复制后再改。",
-                                parent=self.root)
+            messagebox.showinfo("不可重命名", "内置「默认」方案请用「新建副本」复制后再改。", parent=self.root)
             return
-        name = simpledialog.askstring("重命名方案", "新名称：",
-                                      initialvalue=self.active_profile, parent=self.root)
+        name = simpledialog.askstring("重命名方案", "新名称：", initialvalue=self.active_profile, parent=self.root)
         if not name or name.strip() == self.active_profile:
             return
         name = name.strip()
@@ -3051,12 +3318,10 @@ class CheatApp:
         if len(self.store["profiles"]) <= 1:
             messagebox.showinfo("不能删除", "至少保留一个方案。", parent=self.root)
             return
-        if not messagebox.askyesno("删除方案",
-                                   f"确定删除方案「{self.active_profile}」？", parent=self.root):
+        if not messagebox.askyesno("删除方案", f"确定删除方案「{self.active_profile}」？", parent=self.root):
             return
         prof = next(p for p in self.store["profiles"] if p["name"] == self.active_profile)
-        self._undo = {"kind": "profile",
-                      "profile": {"name": prof["name"], "cheats": [dict(c) for c in prof["cheats"]]}}
+        self._undo = {"kind": "profile", "profile": {"name": prof["name"], "cheats": [dict(c) for c in prof["cheats"]]}}
         self.store["profiles"] = [p for p in self.store["profiles"] if p["name"] != self.active_profile]
         self.active_profile = self.store["profiles"][0]["name"]
         self.cheats = self.store["profiles"][0]["cheats"]
@@ -3075,14 +3340,16 @@ class CheatApp:
         self.settings.update(preset)
         self.var_delay.set(int(preset["char_interval_ms"]))
         self.persist()
-        self.log(f"已套用「{name}」预设：每字间隔 {preset['char_interval_ms']}ms、"
-                 f"前置延迟 {preset['pre_delay_ms']}ms。", "ok")
+        self.log(f"已套用「{name}」预设：每字间隔 {preset['char_interval_ms']}ms、前置延迟 {preset['pre_delay_ms']}ms。", "ok")
 
     def export_profile(self):
         path = filedialog.asksaveasfilename(
-            title="导出方案", defaultextension=".json",
+            title="导出方案",
+            defaultextension=".json",
             initialfile=f"{self.active_profile}.json",
-            filetypes=[("JSON", "*.json")], parent=self.root)
+            filetypes=[("JSON", "*.json")],
+            parent=self.root,
+        )
         if not path:
             return
         payload = {
@@ -3101,16 +3368,23 @@ class CheatApp:
     def export_bundle(self):
         stamp = time.strftime("%Y%m%d")
         path = filedialog.asksaveasfilename(
-            title="导出整包", defaultextension=".json",
+            title="导出整包",
+            defaultextension=".json",
             initialfile=f"VC-Cheat-Typer-整包-{stamp}.json",
-            filetypes=[("JSON", "*.json")], parent=self.root)
+            filetypes=[("JSON", "*.json")],
+            parent=self.root,
+        )
         if not path:
             return
-        payload = bundle_payload({
-            "settings": self.settings, "active_profile": self.active_profile,
-            "profiles": self.store["profiles"], "stats": self.stats,
-            "today": self.store.get("today"),
-        })
+        payload = bundle_payload(
+            {
+                "settings": self.settings,
+                "active_profile": self.active_profile,
+                "profiles": self.store["profiles"],
+                "stats": self.stats,
+                "today": self.store.get("today"),
+            }
+        )
         try:
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, ensure_ascii=False, indent=2)
@@ -3122,8 +3396,7 @@ class CheatApp:
         self.show_toast("✔ 整包已导出", "ok")
 
     def import_bundle(self):
-        path = filedialog.askopenfilename(title="导入整包（覆盖当前全部方案与设置）",
-                                          filetypes=[("JSON", "*.json")], parent=self.root)
+        path = filedialog.askopenfilename(title="导入整包（覆盖当前全部方案与设置）", filetypes=[("JSON", "*.json")], parent=self.root)
         if not path:
             return
         try:
@@ -3138,22 +3411,21 @@ class CheatApp:
             return
         total = sum(len(p["cheats"]) for p in store["profiles"])
         if not messagebox.askyesno(
-                "确认覆盖",
-                f"将用整包内容覆盖当前所有方案与设置：\n\n"
-                f"方案 {len(store['profiles'])} 个 / 秘籍 {total} 条\n"
-                f"导出时间：{raw.get('exported_at') or '未知'}\n\n"
-                f"当前内容会先记入 cheats.bak.json，可再回滚。继续？",
-                parent=self.root):
+            "确认覆盖",
+            f"将用整包内容覆盖当前所有方案与设置：\n\n"
+            f"方案 {len(store['profiles'])} 个 / 秘籍 {total} 条\n"
+            f"导出时间：{raw.get('exported_at') or '未知'}\n\n"
+            f"当前内容会先记入 cheats.bak.json，可再回滚。继续？",
+            parent=self.root,
+        ):
             return
         self._undo = None
         self._adopt_store(store)
         self.persist()
-        self.log(f"整包导入完成：{len(store['profiles'])} 个方案 / {total} 条秘籍，"
-                 f"当前「{self.active_profile}」。", "ok")
+        self.log(f"整包导入完成：{len(store['profiles'])} 个方案 / {total} 条秘籍，当前「{self.active_profile}」。", "ok")
 
     def import_profile(self):
-        path = filedialog.askopenfilename(title="导入方案",
-                                          filetypes=[("JSON", "*.json")], parent=self.root)
+        path = filedialog.askopenfilename(title="导入方案", filetypes=[("JSON", "*.json")], parent=self.root)
         if not path:
             return
         try:
@@ -3196,10 +3468,30 @@ class CheatApp:
             pass
         self.persist()
 
-    def persist(self):
+    def persist(self, delay_ms: int = 300):
+        """延迟合并保存：连续发送时 stats/history 各写一次盘 → 合并成一次。"""
+        self._sync_runtime_refs()
+        if self._persist_job is not None:
+            try:
+                self.root.after_cancel(self._persist_job)
+            except Exception:
+                pass
+        self._persist_job = self.root.after(delay_ms, self.flush_persist)
+
+    def _sync_runtime_refs(self):
         self.store["settings"] = self.settings
         self.store["stats"] = self.stats
         self.store["active_profile"] = self.active_profile
+
+    def flush_persist(self):
+        """立即落盘：关闭程序、测试与需要强一致的场景专用。"""
+        if self._persist_job is not None:
+            try:
+                self.root.after_cancel(self._persist_job)
+            except Exception:
+                pass
+            self._persist_job = None
+        self._sync_runtime_refs()
         save_store(self.store)
 
     # -- 其他交互 -----------------------------------------------------------
@@ -3216,8 +3508,7 @@ class CheatApp:
         self.settings = store["settings"]
         self.stats = store["stats"]
         self.active_profile = store["active_profile"]
-        prof = next((p for p in store["profiles"] if p["name"] == self.active_profile),
-                    store["profiles"][0])
+        prof = next((p for p in store["profiles"] if p["name"] == self.active_profile), store["profiles"][0])
         self.active_profile = prof["name"]
         self.cheats = prof["cheats"]
         self.var_kw.set(self.settings.get("target_keywords", ""))
@@ -3238,15 +3529,11 @@ class CheatApp:
     def restore_backup(self):
         bak = backup_path()
         if not os.path.exists(bak):
-            messagebox.showinfo("没有备份",
-                                f"还没有备份文件：\n{bak}\n\n"
-                                f"备份会在每次保存配置时自动生成（保留上一版）。",
-                                parent=self.root)
+            messagebox.showinfo("没有备份", f"还没有备份文件：\n{bak}\n\n备份会在每次保存配置时自动生成（保留上一版）。", parent=self.root)
             return
-        if not messagebox.askyesno("从备份恢复",
-                                   f"将用上一版配置覆盖当前内容：\n{bak}\n\n"
-                                   f"当前配置会先被备份，可再次回滚。继续？",
-                                   parent=self.root):
+        if not messagebox.askyesno(
+            "从备份恢复", f"将用上一版配置覆盖当前内容：\n{bak}\n\n当前配置会先被备份，可再次回滚。继续？", parent=self.root
+        ):
             return
         store = load_store(bak)
         if last_load_warning():
@@ -3255,8 +3542,7 @@ class CheatApp:
         self._undo = None
         self._adopt_store(store)
         self.persist()
-        self.log(f"已从备份恢复（方案 {len(store['profiles'])} 个，"
-                 f"当前「{self.active_profile}」{len(self.cheats)} 条）。", "ok")
+        self.log(f"已从备份恢复（方案 {len(store['profiles'])} 个，当前「{self.active_profile}」{len(self.cheats)} 条）。", "ok")
 
     def pick_window(self):
         """拾取目标窗口。
@@ -3269,14 +3555,10 @@ class CheatApp:
         if not hwnd:
             hwnd, title, exe = self._last_foreign
         if not hwnd:
-            messagebox.showinfo(
-                "拾取失败",
-                "还没有记录到游戏窗口。\n\n请先切到游戏窗口停留一两秒，再回来点这个按钮。",
-                parent=self.root)
+            messagebox.showinfo("拾取失败", "还没有记录到游戏窗口。\n\n请先切到游戏窗口停留一两秒，再回来点这个按钮。", parent=self.root)
             return
         if self._is_own_window(hwnd):
-            messagebox.showinfo("拾取失败", "取到的是本工具自己的窗口，请先切到游戏再试。",
-                                parent=self.root)
+            messagebox.showinfo("拾取失败", "取到的是本工具自己的窗口，请先切到游戏再试。", parent=self.root)
             return
         kw = title if title else os.path.splitext(exe)[0]
         self.var_kw.set(kw)
@@ -3329,8 +3611,7 @@ class CheatApp:
         win = tk.Toplevel(self.root)
         win.title("环境诊断")
         win.geometry("760x520")
-        txt = tk.Text(win, wrap="word", font=("Consolas", 10), padx=10, pady=8,
-                      bg="#f8fafc", relief="flat")
+        txt = tk.Text(win, wrap="word", font=("Consolas", 10), padx=10, pady=8, bg="#f8fafc", relief="flat")
         txt.pack(fill="both", expand=True, padx=10, pady=(10, 4))
         txt.insert("1.0", text)
         txt.configure(state="disabled")
@@ -3360,9 +3641,9 @@ class CheatApp:
         if not self.command_registry:
             self.command_registry = default_commands(self)
         try:
-            CommandPalette(self.root, self.command_registry, self.ui_tokens,
-                           on_status=self._nova_command_status,
-                           scale=float(getattr(self, "ui", 1.0)))
+            CommandPalette(
+                self.root, self.command_registry, self.ui_tokens, on_status=self._nova_command_status, scale=float(getattr(self, "ui", 1.0))
+            )
         except Exception as exc:
             self.log(f"命令面板打开失败：{exc}", "warn")
 
@@ -3381,6 +3662,7 @@ class CheatApp:
         apply_theme(self.ui_theme, classic=not self.nova_ui)
         self.ui_tokens = ui_tokens(self.ui_theme, self.ui_density)
         self._setup_style(reset_geometry=False)  # 只重配 ttk 样式，不动窗口几何
+        self._apply_content_theme()  # tk 原生控件（工具条/搜索/日志）重刷
         if self.shell:
             self.shell.tk_tokens = self.ui_tokens
             self.shell.refresh_theme(self.ui_tokens)
@@ -3394,6 +3676,7 @@ class CheatApp:
         url = "https://github.com/mekks561/GTA-Vice-City-Cheat-Typer/releases"
         try:
             import webbrowser
+
             webbrowser.open(url)
             self.log(f"已请求打开 Release 页（本程序不联网）：{url}", "info")
         except Exception as exc:
@@ -3419,8 +3702,12 @@ class CheatApp:
     def export_v2_compat(self):
         """显式导出 v2 兼容配置（不覆盖当前 v3 文件，供旧版程序 / 回退使用）。"""
         path = filedialog.asksaveasfilename(
-            title="导出 v2 兼容配置", defaultextension=".json", initialfile="cheats.v2.json",
-            filetypes=[("JSON", "*.json")], parent=self.root)
+            title="导出 v2 兼容配置",
+            defaultextension=".json",
+            initialfile="cheats.v2.json",
+            filetypes=[("JSON", "*.json")],
+            parent=self.root,
+        )
         if not path:
             return
         try:
@@ -3439,11 +3726,12 @@ class CheatApp:
         if not targets:
             self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
             return
-        group = simpledialog.askstring("批量改分组",
-                                       f"把选中的 {len(targets)} 条设为分组：\n"
-                                       "（武器/生存/通缉/载具/改装/交通/天气/市民/自定义，可自填）",
-                                       initialvalue=targets[0].get("group") or "自定义",
-                                       parent=self.root)
+        group = simpledialog.askstring(
+            "批量改分组",
+            f"把选中的 {len(targets)} 条设为分组：\n（武器/生存/通缉/载具/改装/交通/天气/市民/自定义，可自填）",
+            initialvalue=targets[0].get("group") or "自定义",
+            parent=self.root,
+        )
         if not group or not group.strip():
             return
         group = group.strip()
@@ -3460,26 +3748,29 @@ class CheatApp:
             return
         # 1.9.1：只给「未绑定 / 已冲突」的条目换键。
         # 全选后若把 28 条正常热键也重排一遍，用户精心配过的键位会被无声打乱。
-        ids = [c["id"] for c in targets
-               if not c.get("hotkey") or c["id"] in self.conflicts]
+        ids = [c["id"] for c in targets if not c.get("hotkey") or c["id"] in self.conflicts]
         skipped = len(targets) - len(ids)
         if not ids:
             self.log(f"选中的 {skipped} 条都已有可用热键，无需重新分配。", "info")
             return
         changed = self._assign_free_combos(ids, 0)
-        self.log(f"批量分配空闲热键：{len(changed)} 条已更新"
-                 + (f"，另有 {skipped} 条已有可用热键保持不变" if skipped else "") + "。", "ok")
+        self.log(
+            f"批量分配空闲热键：{len(changed)} 条已更新" + (f"，另有 {skipped} 条已有可用热键保持不变" if skipped else "") + "。", "ok"
+        )
 
     def batch_set_interval(self):
         targets = self._batch_targets()
         if not targets:
             self.log("请先选中至少一条秘籍（Ctrl/Shift 可多选）。", "info")
             return
-        value = simpledialog.askinteger("批量发送间隔",
-                                        f"给选中的 {len(targets)} 条设置每字间隔 (ms)：\n"
-                                        "0 = 跟随全局；范围 0–300",
-                                        initialvalue=int(targets[0].get("interval_ms") or 0),
-                                        minvalue=0, maxvalue=300, parent=self.root)
+        value = simpledialog.askinteger(
+            "批量发送间隔",
+            f"给选中的 {len(targets)} 条设置每字间隔 (ms)：\n0 = 跟随全局；范围 0–300",
+            initialvalue=int(targets[0].get("interval_ms") or 0),
+            minvalue=0,
+            maxvalue=300,
+            parent=self.root,
+        )
         if value is None:
             return
         for c in targets:
@@ -3497,13 +3788,12 @@ class CheatApp:
         preview = "\n".join(f"· {n}" for n in names[:10])
         if len(names) > 10:
             preview += f"\n· … 另有 {len(names) - 10} 条"
-        if not messagebox.askyesno("批量删除",
-                                   f"确定删除选中的 {len(targets)} 条秘籍？\n\n{preview}\n\n"
-                                   "可点「撤销」一次性恢复（保留完整快照）。", parent=self.root):
+        if not messagebox.askyesno(
+            "批量删除", f"确定删除选中的 {len(targets)} 条秘籍？\n\n{preview}\n\n可点「撤销」一次性恢复（保留完整快照）。", parent=self.root
+        ):
             return
         # 完整快照而非逐条记录：批量删除必须一步全恢复
-        self._undo = {"kind": "batch_cheats", "profile": self.active_profile,
-                      "snapshot": [dict(c) for c in self.cheats]}
+        self._undo = {"kind": "batch_cheats", "profile": self.active_profile, "snapshot": [dict(c) for c in self.cheats]}
         ids = {c["id"] for c in targets}
         self.cheats[:] = [c for c in self.cheats if c["id"] not in ids]
         self.persist()
@@ -3530,11 +3820,11 @@ class CheatApp:
         # 先停发送：不能让线程在窗口销毁后还往系统里注入按键
         self._stop.set()
         if self.sending.locked():
-            deadline = time.time() + 0.3     # 20ms 切片下 300ms 足够走完一次取消
+            deadline = time.time() + 0.3  # 20ms 切片下 300ms 足够走完一次取消
             while self.sending.locked() and time.time() < deadline:
                 time.sleep(0.02)
         try:
-            release_modifiers()               # 兜底松开修饰键：关掉程序也要能正常走路
+            release_modifiers()  # 兜底松开修饰键：关掉程序也要能正常走路
         except Exception:
             pass
         try:
@@ -3546,7 +3836,7 @@ class CheatApp:
             self.settings["auto_switch"] = bool(self.var_auto_switch.get())
             self.settings["hooks_enabled"] = bool(self.var_hooks.get())
             self.settings["char_interval_ms"] = int(self.var_delay.get())
-            self.persist()
+            self.flush_persist()
         except Exception:
             pass
         try:
@@ -3572,8 +3862,7 @@ def selftest() -> int:
     print(f"    sizeof(INPUT) = {size} (期望 40, 32 位下为 28)")
     ok &= size in (40, 28)
 
-    for text, expect in [("F1", "F1"), ("Shift+F1", "Shift+F1"),
-                         ("ctrl+shift+F12", "Ctrl+Shift+F12"), ("Alt+3", "Alt+3")]:
+    for text, expect in [("F1", "F1"), ("Shift+F1", "Shift+F1"), ("ctrl+shift+F12", "Ctrl+Shift+F12"), ("Alt+3", "Alt+3")]:
         parsed = parse_combo(text)
         got = format_combo(*parsed) if parsed else None
         print(f"    组合键 {text!r} -> {got!r}")
@@ -3596,20 +3885,32 @@ def selftest() -> int:
 
     print("[2b] v1→v2 迁移 / 统计")
     import tempfile
+
     with tempfile.TemporaryDirectory() as td:
         legacy = os.path.join(td, "v1.json")
         with open(legacy, "w", encoding="utf-8") as fh:
-            json.dump({"app": "vc-cheat-typer", "version": 1,
-                       "settings": {"char_interval_ms": 80},
-                       "cheats": [{"id": "x1", "name": "满血", "code": "ASPIRINE",
-                                   "hotkey": "F4", "group": "生存", "note": ""}]}, fh, ensure_ascii=False)
+            json.dump(
+                {
+                    "app": "vc-cheat-typer",
+                    "version": 1,
+                    "settings": {"char_interval_ms": 80},
+                    "cheats": [{"id": "x1", "name": "满血", "code": "ASPIRINE", "hotkey": "F4", "group": "生存", "note": ""}],
+                },
+                fh,
+                ensure_ascii=False,
+            )
         mig = load_store(legacy)
         mig_cheats = mig["profiles"][0]["cheats"]
-        print(f"    迁移后: version={mig['version']} 方案={mig['active_profile']} "
-              f"条目={len(mig_cheats)} 间隔={mig['settings']['char_interval_ms']}")
-        ok &= (mig["version"] == STORE_VERSION and len(mig_cheats) == 1
-               and mig_cheats[0]["code"] == "ASPIRINE"
-               and mig["settings"]["char_interval_ms"] == 80)
+        print(
+            f"    迁移后: version={mig['version']} 方案={mig['active_profile']} "
+            f"条目={len(mig_cheats)} 间隔={mig['settings']['char_interval_ms']}"
+        )
+        ok &= (
+            mig["version"] == STORE_VERSION
+            and len(mig_cheats) == 1
+            and mig_cheats[0]["code"] == "ASPIRINE"
+            and mig["settings"]["char_interval_ms"] == 80
+        )
         stats: dict = {}
         n1 = bump_stats(stats, "aspirine")
         n2 = bump_stats(stats, "ASPIRINE")
@@ -3657,8 +3958,7 @@ def selftest() -> int:
     ok &= len(hits) >= 1
 
     print("[2e] 1.9 数据层：v1→v3 迁移 / 秘籍包 / 文本导入 / 模板")
-    legacy = {"version": 1, "settings": {"char_interval_ms": 80},
-              "cheats": [{"code": "ASPIRINE", "name": "满血"}]}
+    legacy = {"version": 1, "settings": {"char_interval_ms": 80}, "cheats": [{"code": "ASPIRINE", "name": "满血"}]}
     v3 = migrate_store(legacy)
     print(f"    迁移链: v1 → v{v3['version']}，条目 {len(v3['profiles'][0]['cheats'])}")
     ok &= v3["version"] == STORE_VERSION and v3["settings"]["char_interval_ms"] == 80
@@ -3688,18 +3988,16 @@ def selftest() -> int:
 
     print("[2g] 2.0 通用输入平台：core / 目标 / 策略 / 钩子")
     import vcct.core as core_mod
+
     print(f"    core 公共 API {len(core_mod.__all__)} 项，配置 v{core_mod.STORE_VERSION}")
     ok &= hasattr(core_mod, "Target") and hasattr(core_mod, "plan_send")
-    ts = normalize_targets([{"name": "VC", "match_type": "exe", "pattern": "gta-vc",
-                             "profile_ref": "默认"}])
+    ts = normalize_targets([{"name": "VC", "match_type": "exe", "pattern": "gta-vc", "profile_ref": "默认"}])
     hit = evaluate_targets(ts, "GTA", "gta-vc.exe")
     print(f"    目标规则: 命中 {hit['name'] if hit else '无'} → 方案 {resolve_target(hit or {}, default_store())['profile']}")
     ok &= bool(hit) and resolve_target(hit, default_store())["profile"] == "默认"
     p_fixed = plan_send(normalize_strategy(None), "ASPIRINE", 45, 180)
-    p_retry = plan_send(normalize_strategy({"kind": "adaptive", "retries": 2}),
-                        "RINE", 45, 180, attempt=1)
-    print(f"    策略: fixed {p_fixed.interval_ms}ms/hold {p_fixed.hold_ms}ms；"
-          f"adaptive 重试 {p_retry.interval_ms}ms")
+    p_retry = plan_send(normalize_strategy({"kind": "adaptive", "retries": 2}), "RINE", 45, 180, attempt=1)
+    print(f"    策略: fixed {p_fixed.interval_ms}ms/hold {p_fixed.hold_ms}ms；adaptive 重试 {p_retry.interval_ms}ms")
     ok &= (p_fixed.interval_ms, p_fixed.hold_ms, p_fixed.pre_delay_ms) == (45, 22, 180)
     ok &= p_retry.interval_ms > p_fixed.interval_ms and p_retry.pre_delay_ms == 0
     bus = HookBus(enabled=False)
@@ -3709,8 +4007,7 @@ def selftest() -> int:
 
     print("[2h] 2.1 数据目录 / 多语言 / 打包元数据")
     p = describe_paths()
-    print(f"    数据目录模式 {p['mode']} · 配置 {os.path.basename(p['config'])}"
-          f" · 模式文件 {os.path.basename(p['mode_file'])}")
+    print(f"    数据目录模式 {p['mode']} · 配置 {os.path.basename(p['config'])} · 模式文件 {os.path.basename(p['mode_file'])}")
     ok &= p["mode"] in ("portable", "user") and p["config"].endswith("cheats.json")
     zh = t("添加")
     set_locale("en")
@@ -3718,20 +4015,16 @@ def selftest() -> int:
     set_locale("zh")
     print(f"    i18n: 添加 → {zh} / {en}")
     ok &= zh == "添加" and en == "Add" and get_locale() == "zh"
-    print(f"    设置项: locale={DEFAULT_SETTINGS.get('locale')} "
-          f"check_updates={DEFAULT_SETTINGS.get('check_updates')}")
-    ok &= (DEFAULT_SETTINGS.get("locale") == "zh"
-           and DEFAULT_SETTINGS.get("check_updates") is False)
+    print(f"    设置项: locale={DEFAULT_SETTINGS.get('locale')} check_updates={DEFAULT_SETTINGS.get('check_updates')}")
+    ok &= DEFAULT_SETTINGS.get("locale") == "zh" and DEFAULT_SETTINGS.get("check_updates") is False
 
     print("[2i] 2.2 Nova UI：设计令牌 / 命令注册表 / 双主题")
     wc = check_contrast(ui_tokens("light").colors)
     wcd = check_contrast(ui_tokens("dark").colors)
-    print(f"    WCAG 浅色最小 {min(v['ratio'] for v in wc.values())}:1 / "
-          f"深色最小 {min(v['ratio'] for v in wcd.values())}:1（要求 ≥4.5）")
+    print(f"    WCAG 浅色最小 {min(v['ratio'] for v in wc.values())}:1 / 深色最小 {min(v['ratio'] for v in wcd.values())}:1（要求 ≥4.5）")
     ok &= all(v["pass"] for v in list(wc.values()) + list(wcd.values()))
     reg = default_commands(None)
-    print(f"    命令注册表 {len(reg)} 项；模糊搜索 'hist' 命中 "
-          f"{len(reg.search('hist'))} 条")
+    print(f"    命令注册表 {len(reg)} 项；模糊搜索 'hist' 命中 {len(reg.search('hist'))} 条")
     ok &= len(reg) >= 20 and bool(reg.search("hist"))
     print(f"    UI 形态 nova / classic 双模式，配置版本 STORE_VERSION={STORE_VERSION}")
     ok &= STORE_VERSION == 3
@@ -3747,7 +4040,7 @@ def selftest() -> int:
         if got_fg and got.strip().upper() == "ASPIRINE":
             break
         if attempt < 2:
-            time.sleep(0.3)      # 1.9.1：前台被抢时重试，避免自检偶发误报
+            time.sleep(0.3)  # 1.9.1：前台被抢时重试，避免自检偶发误报
     print(f"    取得前台: {got_fg} / 期望 'ASPIRINE'（不区分大小写）/ 实得 {got!r}")
     probe_ok = bool(got_fg and got.strip().upper() == "ASPIRINE")
     if not got_fg:
@@ -3756,13 +4049,12 @@ def selftest() -> int:
         print("    ⚠ 未取得前台：本次探针未验证（其他窗口占用前台时常见），可在空闲桌面重跑。")
     elif not probe_ok:
         print("    ⚠ 未落字：请检查杀软是否拦截 SendInput、以及中文输入法是否被绕开。")
-    ok &= (probe_ok or not got_fg)
+    ok &= probe_ok or not got_fg
 
     print("[5] 热键注册与冲突检测")
     events: queue.Queue = queue.Queue()
     engine = HotkeyEngine(events)
-    engine.apply([(1, MOD_CONTROL | MOD_ALT, VK_BY_NAME["f1"], "a"),
-                  (2, MOD_CONTROL | MOD_ALT, VK_BY_NAME["f1"], "b")])
+    engine.apply([(1, MOD_CONTROL | MOD_ALT, VK_BY_NAME["f1"], "a"), (2, MOD_CONTROL | MOD_ALT, VK_BY_NAME["f1"], "b")])
     res = None
     deadline = time.time() + 3
     while time.time() < deadline:
@@ -3814,7 +4106,13 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
     add("配置", data_path())
     add("数据模式", f"{read_data_mode()}（模式文件 {describe_paths()['mode_file']}）")
     add("界面语言", get_locale())
-    add("界面形态", f"{DEFAULT_SETTINGS.get('ui_mode')} / theme={DEFAULT_SETTINGS.get('theme')}")
+    try:
+        settings = load_store().get("settings") or {}
+    except Exception:
+        settings = {}
+    add(
+        "界面形态", f"{settings.get('ui_mode') or DEFAULT_SETTINGS['ui_mode']} / theme={settings.get('theme') or DEFAULT_SETTINGS['theme']}"
+    )
     add("日志", log_file())
 
     hwnd, title, exe = find_game_window()
@@ -3823,8 +4121,7 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
         add("游戏窗口", f"{title!r} / {exe or '未知'} / hwnd={hwnd}")
         add("游戏进程", f"pid={pid}　管理员={process_elevated(pid)}")
         try:
-            add("窗口状态", f"可见={bool(user32.IsWindowVisible(hwnd))}　"
-                            f"最小化={bool(user32.IsIconic(hwnd))}")
+            add("窗口状态", f"可见={bool(user32.IsWindowVisible(hwnd))}　最小化={bool(user32.IsIconic(hwnd))}")
         except Exception:
             pass
     else:
@@ -3833,7 +4130,6 @@ def diagnose_report(include_probe: bool = True) -> list[str]:
     fg_title, fg_exe = foreground_info()
     add("当前前台", f"{fg_title!r} / {fg_exe or '未知'}")
 
-    settings = load_store()["settings"]
     kws = [k.strip().lower() for k in str(settings.get("target_keywords") or "").split(",") if k.strip()]
     add("目标关键字", "、".join(kws) or "未设置")
     if kws:
@@ -3867,6 +4163,33 @@ def diagnose() -> int:
     return 0
 
 
+def _redact(text: str) -> str:
+    """诊断包脱敏：把当前用户主目录替换成 ~，避免把账号名带进反馈附件。"""
+    home = os.path.expanduser("~")
+    if home and home not in ("~", "/"):
+        text = text.replace(home, "~")
+        text = text.replace(home.replace("\\", "/"), "~")
+    return text
+
+
+def export_diagnostics(out_path: str | None = None) -> str:
+    """P0：导出脱敏诊断包（环境报告 + 日志 + 配置），供问题反馈。"""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out_path = out_path or os.path.join(os.getcwd(), f"vcct-diag-{stamp}.zip")
+    report = _redact("\n".join(diagnose_report(include_probe=False)))
+    sources = ((log_file(), "logs/app.log"), (data_path(), "cheats.json"))
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("diagnose.txt", report)
+        for src, arc in sources:
+            try:
+                if os.path.isfile(src):
+                    with open(src, "rb") as fh:
+                        zf.writestr(arc, _redact(fh.read().decode("utf-8", "replace")))
+            except OSError:
+                pass
+    return out_path
+
+
 def show_crash_dialog(title: str, detail: str) -> None:
     """2.0：崩溃弹窗的 UI 实现，注入给 core 的日志模块（实现层不依赖 tkinter）。"""
     try:
@@ -3893,20 +4216,39 @@ def main() -> int:
         _cli_ui_mode = "classic"
     elif "--nova-ui" in sys.argv:
         _cli_ui_mode = "nova"
+    # P0：原生崩溃（ctypes 段错误、栈溢出）也会留下 Python 栈，写入独立文件便于定位
+    global _faulthandler_file
+    try:
+        _faulthandler_file = open(os.path.join(log_dir(), "faulthandler.log"), "a", encoding="utf-8")
+        faulthandler.enable(file=_faulthandler_file, all_threads=True)
+    except Exception:
+        faulthandler.enable()
     if "--diagnose" in sys.argv:
         return diagnose()
+    if "--export-diag" in sys.argv:
+        idx = sys.argv.index("--export-diag")
+        out = sys.argv[idx + 1] if len(sys.argv) > idx + 1 and not sys.argv[idx + 1].startswith("--") else None
+        try:
+            print(f"已导出诊断包：{export_diagnostics(out)}")
+            return 0
+        except Exception as exc:
+            print(f"导出诊断包失败：{exc}")
+            return 1
     if "--selftest" in sys.argv:
         return selftest()
     if "--cli" in sys.argv:
         # 2.0-E：把 --cli 之后的参数原样转给 vcct.cli
         from vcct.cli import main as cli_main
-        return cli_main(sys.argv[sys.argv.index("--cli") + 1:])
+
+        return cli_main(sys.argv[sys.argv.index("--cli") + 1 :])
     if "--export-v2" in sys.argv:
         # 1.9：给仍用 1.6/1.7/1.8 的人留下显式降级出口（不覆盖当前 v3 配置）
         idx = sys.argv.index("--export-v2")
-        out = (sys.argv[idx + 1] if len(sys.argv) > idx + 1
-               and not sys.argv[idx + 1].startswith("--")
-               else os.path.join(os.path.dirname(data_path()), "cheats.v2.json"))
+        out = (
+            sys.argv[idx + 1]
+            if len(sys.argv) > idx + 1 and not sys.argv[idx + 1].startswith("--")
+            else os.path.join(os.path.dirname(data_path()), "cheats.v2.json")
+        )
         try:
             export_v2(load_store(), out)
             print(f"已导出 v2 兼容配置：{out}")
@@ -3915,7 +4257,7 @@ def main() -> int:
             print(f"导出失败：{exc}")
             return 1
 
-    install_crash_hooks(show_dialog=show_crash_dialog)   # 之后任何未捕获异常都会落盘到 logs/app.log
+    install_crash_hooks(show_dialog=show_crash_dialog)  # 之后任何未捕获异常都会落盘到 logs/app.log
     append_log(f"===== 进程启动 pid={os.getpid()} =====")
 
     # 单实例：避免两个进程抢同一批全局热键，注册失败会让人误以为是"冲突"
@@ -3928,7 +4270,7 @@ def main() -> int:
         root.destroy()
         return 0
 
-    enable_dpi_awareness()   # 必须在 tk.Tk() 之前
+    enable_dpi_awareness()  # 必须在 tk.Tk() 之前
 
     root = tk.Tk()
     forced = os.environ.get("VCCT_UI_SCALE", "").strip()

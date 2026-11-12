@@ -429,5 +429,55 @@ class TestSorting(unittest.TestCase):
         self.assertEqual([c["code"] for c in self.cheats], before)
 
 
+class TestSchema(unittest.TestCase):
+    """P0：统一 schema 回归——策略字段不再被归一化丢弃，两条实现保持一致。"""
+
+    def test_cheat_keeps_strategy_fields(self):
+        item = {"code": "panzer", "strategy": {"kind": "burst", "interval_ms": 999},
+                "strategy_ref": "快速"}
+        norm = _norm_cheat(item)
+        self.assertEqual(norm["code"], "PANZER")
+        self.assertEqual(norm["strategy"]["kind"], "burst")
+        self.assertEqual(norm["strategy"]["interval_ms"], 300)   # 策略值走夹取
+        self.assertEqual(norm["strategy_ref"], "快速")
+
+    def test_cheat_without_strategy_unchanged(self):
+        norm = _norm_cheat({"code": "ASPIRINE"})
+        self.assertNotIn("strategy", norm)
+        self.assertNotIn("strategy_ref", norm)
+
+    def test_strict_code_validation(self):
+        from vcct.schema import is_valid_code, normalize_cheat
+        self.assertTrue(is_valid_code("THUGSTOOLS"))
+        self.assertFalse(is_valid_code("A"))
+        self.assertFalse(is_valid_code("A-B"))
+        self.assertIsNone(normalize_cheat({"code": "A"}, strict_code=True))
+        # 宽松模式保留旧配置，只做去空白 + 大写
+        self.assertEqual(normalize_cheat({"code": "a b"}, strict_code=False)["code"], "AB")
+
+    def test_strategy_matches_core(self):
+        from vcct.core.strategy import normalize_strategy as core_norm
+        from vcct.schema import normalize_strategy as schema_norm
+        # 空输入：schema 用 None 表示"无覆盖"，core 返回 fixed 默认值——这是唯一有意的差异
+        self.assertIsNone(schema_norm({}))
+        self.assertIsNone(schema_norm(None))
+        for raw in ({"kind": "adaptive", "interval_ms": 5, "hold_ms": 900, "retries": 9},
+                    {"kind": "nope", "pre_delay_ms": -1},
+                    {"kind": "burst"}):
+            self.assertEqual(schema_norm(raw), core_norm(raw), raw)
+
+    def test_profile_list_normalized_on_save(self):
+        store = default_store()
+        store["profiles"] = [{"name": "默认", "cheats": [{"code": "X1", "strategy": {"kind": "burst"}}]},
+                             {"name": "", "cheats": []}]
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "cheats.json")
+            save_store(store, path)
+            loaded = load_store(path)
+        names = [p["name"] for p in loaded["profiles"]]
+        self.assertEqual(len(names), len(set(names)), names)       # 方案名去重
+        self.assertTrue(all(n for n in names), names)              # 空名不落盘
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

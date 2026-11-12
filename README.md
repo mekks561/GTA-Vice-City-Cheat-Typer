@@ -109,7 +109,7 @@
 | 响应 R1 | 主窗口构建 <1.5s | nova **79.3ms** / classic **57.3ms** |
 | 响应 R2 | 1000 条渲染 <300ms | **10.3ms** |
 | 响应 R3 | 200 条命令过滤 <20ms | **0.1ms** |
-| 回归 | 228 条单测、ruff 0、selftest、0 次 access violation | 全绿 |
+| 回归 | 233 条单测、ruff 0、pyright 0、覆盖率 87%、selftest、0 次 access violation | 全绿 |
 
 > CI 上性能断言取规格值 3 倍余量避免机器波动；上表是本机实测值。观感类（窄窗口折叠、三档缩放截图）仍需人工复核。
 
@@ -287,7 +287,7 @@ python -m vcct.cli pack info cheats.vcpack
 | 统计增强 | 新增「最近使用」列；表头 次数/最近/名称 点击排序（再点反向）；「⋯ 更多」→ 清空统计；计数栏显示「今日 N 次」 |
 | 配置容错与备份 | cheats.json 解析失败 → 原文件改名 `cheats.corrupt-<时间戳>.json` 留存并弹窗提示；每次保存前自动备份上一版，「从备份恢复」一键回滚 |
 | 日志与崩溃捕获 | 界面日志同步写 `logs/app.log`（1MB 滚动保留 3 份）；未捕获异常（含子线程）落盘并弹窗告知路径；exe 只读目录时自动退到 `%LOCALAPPDATA%` |
-| CI | GitHub Actions（Windows，Python 3.10/3.12）：ruff + 单元测试 + 编译检查，push 即回归 |
+| CI | GitHub Actions（Windows，Python 3.10/3.12）：ruff format/check + pyright + 覆盖率门槛（80%）+ 单元测试，push 即回归 |
 
 ## v1.5 更新内容
 
@@ -300,7 +300,7 @@ python -m vcct.cli pack info cheats.vcpack
 | 使用统计 | 记录每条秘籍发送次数，点击「次数 ↓」表头按使用频率排序 |
 | 导入/导出方案 | JSON 分享 |
 | 注入自检 | 替代原"测试输入窗口"：在隐藏原生 Win32 窗口上验证完整注入链路并弹窗报结果 |
-| 工程化 | `tests/` 回归测试集（`python -m unittest discover -s tests`）+ `pyproject.toml`（ruff 静态检查），均为开发期工具，**运行时依旧零依赖** |
+| 工程化 | `tests/` 回归测试集（`python -m unittest discover -s tests`）+ `pyproject.toml`（ruff / pyright / coverage 配置）+ `uv.lock`（`uv sync --extra dev` 一键装开发工具），均为开发期工具，**运行时依旧零依赖** |
 
 ---
 

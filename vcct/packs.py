@@ -25,6 +25,7 @@
   否则"导出 → 手工改两条 → 再导入"的往返流程会把自己锁死。
 * diff 预览分三类：新增 / 冲突（同 code 内容不同）/ 相同；仅导入勾选的条目。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,10 +33,11 @@ import json
 import time
 import uuid
 
+from .schema import clean_code, is_valid_code, normalize_strategy
+
 PACK_FORMAT = "vcct-pack"
 PACK_VERSION = 1
-PACK_CHEAT_KEYS = ("id", "name", "code", "hotkey", "group", "note",
-                   "interval_ms", "verified")
+PACK_CHEAT_KEYS = ("id", "name", "code", "hotkey", "group", "note", "interval_ms", "verified", "strategy")
 
 
 def _version_tuple(text: str) -> tuple[int, ...]:
@@ -49,11 +51,11 @@ def _version_tuple(text: str) -> tuple[int, ...]:
 
 
 def _norm_pack_cheat(item) -> dict | None:
-    """包内秘籍归一化（不依赖 store，避免模块耦合）。"""
+    """包内秘籍归一化：校验规则与 store/importer 共用 vcct/schema.py。"""
     if not isinstance(item, dict):
         return None
-    code = str(item.get("code") or "").strip().upper()
-    if not code or not all(ch.isalnum() for ch in code):
+    code = clean_code(item.get("code"))
+    if not is_valid_code(code):
         return None
     try:
         interval = int(item.get("interval_ms") or 0)
@@ -61,7 +63,7 @@ def _norm_pack_cheat(item) -> dict | None:
         interval = 0
     if not 0 <= interval <= 300:
         interval = 0
-    return {
+    out = {
         "id": str(item.get("id") or ""),
         "name": str(item.get("name") or code),
         "code": code,
@@ -71,21 +73,23 @@ def _norm_pack_cheat(item) -> dict | None:
         "interval_ms": interval,
         "verified": bool(item.get("verified", True)),
     }
+    strategy = normalize_strategy(item.get("strategy"))
+    if strategy:
+        out["strategy"] = strategy
+    return out
 
 
 def _canonical(pack: dict) -> bytes:
     """sha256 计算用的规范化字节（剔除 sha256 字段，键排序、无多余空白）。"""
     payload = {k: v for k, v in pack.items() if k != "sha256"}
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False,
-                      separators=(",", ":")).encode("utf-8")
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def pack_signature(pack: dict) -> str:
     return hashlib.sha256(_canonical(pack)).hexdigest()
 
 
-def make_pack(name: str, cheats: list[dict], author: str = "", game: str = "",
-              min_app: str = "1.9.0") -> dict:
+def make_pack(name: str, cheats: list[dict], author: str = "", game: str = "", min_app: str = "1.9.0") -> dict:
     """构造一个合法包（纯函数）；cheats 里的 id 保留但不参与去重。"""
     norm = [c for c in (_norm_pack_cheat(x) for x in cheats) if c]
     pack = {
@@ -111,8 +115,10 @@ def validate_pack(raw, app_ver: str = "1.9.0") -> tuple[dict | None, list[str], 
         return None, [], "文件顶层不是 JSON 对象。"
     if str(raw.get("format") or "") != PACK_FORMAT:
         return None, [], f"不是 .vcpack 格式（format={raw.get('format')!r}）。"
+    if raw.get("pack_version") is None:
+        return None, [], "缺少或非法的 pack_version。"
     try:
-        pv = int(raw.get("pack_version"))
+        pv = int(raw.get("pack_version") or 0)
     except (TypeError, ValueError):
         return None, [], "缺少或非法的 pack_version。"
     if pv < 1 or pv > PACK_VERSION:
@@ -159,18 +165,15 @@ def diff_pack(pack: dict, cheats: list[dict]) -> list[dict]:
         old = existing.get(inc["code"])
         if old is None:
             status = "new"
-        elif any((old.get(k) or "") != (inc.get(k) or "")
-                 for k in ("name", "hotkey", "group", "note", "interval_ms")):
+        elif any((old.get(k) or "") != (inc.get(k) or "") for k in ("name", "hotkey", "group", "note", "interval_ms")):
             status = "conflict"
         else:
             status = "same"
-        out.append({"code": inc["code"], "name": inc["name"], "status": status,
-                    "incoming": inc, "existing": old})
+        out.append({"code": inc["code"], "name": inc["name"], "status": status, "incoming": inc, "existing": old})
     return out
 
 
-def merge_pack(cheats: list[dict], pack: dict, selected_codes: list[str],
-               overwrite: bool = True) -> tuple[list[dict], dict]:
+def merge_pack(cheats: list[dict], pack: dict, selected_codes: list[str], overwrite: bool = True) -> tuple[list[dict], dict]:
     """把勾选条目并入秘籍表（返回**新列表**，不改入参）。
 
     冲突项：overwrite=True 时保留原 id 就地替换；False 时跳过。
@@ -182,10 +185,9 @@ def merge_pack(cheats: list[dict], pack: dict, selected_codes: list[str],
     for inc in pack.get("cheats") or []:
         if inc["code"] not in chosen:
             continue
-        idx = next((i for i, c in enumerate(result)
-                    if str(c.get("code") or "").upper() == inc["code"]), None)
+        idx = next((i for i, c in enumerate(result) if str(c.get("code") or "").upper() == inc["code"]), None)
         if idx is None:
-            item = {k: inc.get(k) for k in PACK_CHEAT_KEYS}
+            item = {k: inc.get(k) for k in PACK_CHEAT_KEYS if inc.get(k) is not None}
             item["id"] = uuid.uuid4().hex[:8]
             item["game"] = str(pack.get("game") or "")
             item["source_pack"] = str(pack.get("name") or "")
@@ -193,7 +195,7 @@ def merge_pack(cheats: list[dict], pack: dict, selected_codes: list[str],
             counts["added"] += 1
         elif overwrite:
             old_id = result[idx].get("id")
-            item = {k: inc.get(k) for k in PACK_CHEAT_KEYS}
+            item = {k: inc.get(k) for k in PACK_CHEAT_KEYS if inc.get(k) is not None}
             item["id"] = old_id or uuid.uuid4().hex[:8]
             item["game"] = str(pack.get("game") or "")
             item["source_pack"] = str(pack.get("name") or "")
@@ -213,13 +215,12 @@ def _candidate_combos() -> list[str]:
     """
     out = []
     for prefix in ("", "Shift+", "Ctrl+", "Ctrl+Shift+", "Alt+"):
-        for i in range(1, 12):   # 避开 F12（调试器常占）
+        for i in range(1, 12):  # 避开 F12（调试器常占）
             out.append(f"{prefix}F{i}")
     return out
 
 
-def auto_avoid_hotkeys(pack: dict, cheats: list[dict],
-                       pause_hotkey: str = "Ctrl+Alt+P") -> tuple[dict, list[dict]]:
+def auto_avoid_hotkeys(pack: dict, cheats: list[dict], pause_hotkey: str = "Ctrl+Alt+P") -> tuple[dict, list[dict]]:
     """1.9-G：包内热键与本地（或包内自身）冲突时，自动改到候选空闲键。
 
     返回 (新包副本, 改键记录 [{code, old, new}])；不改入参。
@@ -228,9 +229,11 @@ def auto_avoid_hotkeys(pack: dict, cheats: list[dict],
     """
     incoming_codes = {c["code"] for c in pack.get("cheats") or []}
     used = {str(pause_hotkey or "").strip().lower()}
-    used |= {str(c.get("hotkey") or "").strip().lower()
-             for c in cheats
-             if c.get("hotkey") and str(c.get("code") or "").upper() not in incoming_codes}
+    used |= {
+        str(c.get("hotkey") or "").strip().lower()
+        for c in cheats
+        if c.get("hotkey") and str(c.get("code") or "").upper() not in incoming_codes
+    }
     candidates = _candidate_combos()
     changed: list[dict] = []
     new_cheats = []
@@ -246,7 +249,7 @@ def auto_avoid_hotkeys(pack: dict, cheats: list[dict],
                 c["hotkey"] = free
                 used.add(free.lower())
             else:
-                c["hotkey"] = ""     # 候选键全占满：留空由用户手动绑定
+                c["hotkey"] = ""  # 候选键全占满：留空由用户手动绑定
                 changed.append({"code": c["code"], "old": hk, "new": ""})
         elif hk:
             used.add(key)

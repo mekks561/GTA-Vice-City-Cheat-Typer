@@ -15,7 +15,17 @@ dependencies = []
 vcct = "vcct.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.4"]
+# dev-only：运行时仍然零依赖，这些包只用于开发/CI。
+# 全部加 python_version>=3.10 标记：运行时仍支持 3.8+，但开发工具链与 CI 一致（3.10/3.12），
+# 这样 `uv lock` 的 3.8 分支不会被 pre-commit 等要求 3.9+/3.10+ 的包卡死。
+dev = [
+    "pytest>=7; python_version >= '3.10'",
+    "ruff>=0.4; python_version >= '3.10'",
+    "pyright>=1.1.380; python_version >= '3.10'",
+    "coverage>=7.4; python_version >= '3.10'",
+    "pre-commit>=3.6; python_version >= '3.10'",
+    "hypothesis>=6.98; python_version >= '3.10'",
+]
 
 [tool.setuptools]
 packages = ["vcct", "vcct.core", "vcct.ui"]
@@ -23,9 +33,33 @@ packages = ["vcct", "vcct.core", "vcct.ui"]
 [tool.ruff]
 line-length = 140
 target-version = "py38"
-exclude = ["tests"]
+exclude = ["tests", "build", "dist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B"]
 # E501 行超限：中文注释密集，交由 line-length=140 宽限
 ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+# 保留作者手工排版：不对单行集合/字典做强制换行
+skip-magic-trailing-comma = true
+
+# 渐进式类型检查：先只覆盖纯逻辑层（零 tkinter），GUI 暂不纳入
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+include = ["vcct/core", "vcct/schema.py", "vcct/store.py", "vcct/packs.py", "vcct/importer.py"]
+exclude = ["tests", "build", "dist"]
+reportMissingModuleSource = "none"
+
+[tool.coverage.run]
+branch = true
+source = ["vcct"]
+omit = ["vcct/ui/*", "vcct/winapi.py", "vcct/tray.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 80

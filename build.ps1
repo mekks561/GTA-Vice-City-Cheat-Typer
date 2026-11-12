@@ -50,6 +50,51 @@ try {
 
     Write-Host "=== VC-Cheat-Typer v$version build ===" -ForegroundColor Cyan
 
+    # P0: generate the Windows VERSIONINFO resource from APP_VER.
+    # Written into build/ only - source files stay untouched.
+    $buildDir = Join-Path $root "build"
+    if (-not (Test-Path -LiteralPath $buildDir)) { New-Item -ItemType Directory -Path $buildDir | Out-Null }
+    $verFile = Join-Path $buildDir "version_info.txt"
+    $vparts = @($version -split '\.')
+    while ($vparts.Count -lt 4) { $vparts += "0" }
+    $fvers = "(" + ($vparts[0..3] -join ", ") + ")"
+    $verBody = @"
+VSVersionInfo(
+  ffi=FixedFileInfo(filevers=$fvers, prodvers=$fvers, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0,0)),
+  kids=[
+    StringFileInfo([StringTable('080404B0', [
+      StringStruct('CompanyName', 'VC-Cheat-Typer'),
+      StringStruct('FileDescription', 'VC-Cheat-Typer'),
+      StringStruct('FileVersion', '$version'),
+      StringStruct('InternalName', 'VC-Cheat-Typer'),
+      StringStruct('OriginalFilename', 'VC-Cheat-Typer.exe'),
+      StringStruct('ProductName', 'VC-Cheat-Typer'),
+      StringStruct('ProductVersion', '$version')])]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])])
+  ]
+)
+"@
+    [IO.File]::WriteAllText($verFile, $verBody, (New-Object Text.UTF8Encoding($false)))
+    $env:VCCT_VERSION_FILE = $verFile
+    Write-Host "[version] resource -> build\version_info.txt" -ForegroundColor Gray
+
+    # P0: optional Authenticode signing. Set VCCT_SIGN_CERT (pfx) to enable.
+    function Sign-Artifact([string]$path) {
+        if (-not $env:VCCT_SIGN_CERT) { return }
+        $tool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+        if (-not $tool) {
+            Write-Host "[sign] signtool.exe not found; skipping $path" -ForegroundColor Yellow
+            return
+        }
+        $signArgs = @("sign", "/fd", "SHA256", "/f", $env:VCCT_SIGN_CERT)
+        if ($env:VCCT_SIGN_PASSWORD) { $signArgs += @("/p", $env:VCCT_SIGN_PASSWORD) }
+        if ($env:VCCT_SIGN_TIMESTAMP) { $signArgs += @("/tr", $env:VCCT_SIGN_TIMESTAMP, "/td", "SHA256") }
+        $signArgs += $path
+        & $tool.Source @signArgs
+        if ($LASTEXITCODE -ne 0) { throw "signtool failed for $path" }
+        Write-Host "[sign] signed $path" -ForegroundColor Green
+    }
+
     if (-not $SkipVerify) {
         Write-Host "[1/3] unittest..." -ForegroundColor Gray
         & $Python -m unittest discover -s tests
@@ -83,6 +128,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
     if (-not (Test-Path -LiteralPath $exePath)) { throw "Build output not found: $exePath" }
+    Sign-Artifact $exePath                  # P0: sign before hashing
     $hash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
     $shaPath = Join-Path $distDir "VC-Cheat-Typer-SHA256.txt"
     [IO.File]::WriteAllText($shaPath, "$hash *VC-Cheat-Typer.exe`n", (New-Object Text.UTF8Encoding($false)))
@@ -103,6 +149,7 @@ try {
     & $Python -m PyInstaller VC-Cheat-Typer-cli.spec --noconfirm
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller (CLI) failed" }
     if (-not (Test-Path -LiteralPath $cliExe)) { throw "CLI output missing" }
+    Sign-Artifact $cliExe
     $cliHash = (Get-FileHash -LiteralPath $cliExe -Algorithm SHA256).Hash.ToLowerInvariant()
     $cliShaPath = Join-Path $distDir "VC-Cheat-Typer-cli-SHA256.txt"
     [IO.File]::WriteAllText($cliShaPath, "$cliHash *VC-Cheat-Typer-cli.exe`n",
@@ -115,13 +162,26 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onedir) failed" }
         $oneDirPath = Join-Path $distDir "VC-Cheat-Typer-onedir"
         if (-not (Test-Path -LiteralPath $oneDirPath)) { throw "onedir output missing" }
+        Sign-Artifact (Join-Path $oneDirPath "VC-Cheat-Typer.exe")
         $zipPath = Join-Path $distDir ("VC-Cheat-Typer-onedir-" + $version + ".zip")
         if (Test-Path -LiteralPath $zipPath) {
             Move-Item -LiteralPath $zipPath -Destination (Join-Path $distDir (
                 "VC-Cheat-Typer-onedir-" + $version + ".zip.previous-" +
                 (Get-Date -Format "yyyyMMdd-HHmmss"))) -Force
         }
-        Compress-Archive -LiteralPath $oneDirPath -DestinationPath $zipPath -Force
+        # Compress-Archive 偶发读到被杀软/索引临时占用的 base_library.zip，重试即可
+        if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+        $zipped = $false
+        for ($i = 1; $i -le 3 -and -not $zipped; $i++) {
+            try {
+                Compress-Archive -LiteralPath $oneDirPath -DestinationPath $zipPath -Force -ErrorAction Stop
+                $zipped = $true
+            } catch {
+                Write-Host "[zip] attempt $i failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                if ($i -lt 3) { Start-Sleep -Seconds 3 }
+            }
+        }
+        if (-not $zipped) { throw "Compress-Archive failed after 3 attempts" }
         $zHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $zShaPath = $zipPath + ".sha256.txt"
         [IO.File]::WriteAllText($zShaPath, "$zHash *" + (Split-Path -Leaf $zipPath) + "`n",
@@ -129,6 +189,25 @@ try {
         Write-Host "OK  $zipPath" -ForegroundColor Green
         Write-Host "    SHA256 $zHash" -ForegroundColor Green
     }
+
+    # P0: SBOM (CycloneDX 1.5 shape). Runtime ships zero third-party packages,
+    # so only the app itself and the PyInstaller toolchain version are recorded.
+    $piVer = (& $Python -m PyInstaller --version 2>$null | Select-Object -First 1)
+    $sbom = [ordered]@{
+        bomFormat   = "CycloneDX"
+        specVersion = "1.5"
+        version     = 1
+        metadata    = [ordered]@{
+            timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            tools     = @([ordered]@{ vendor = "PyInstaller"; name = "pyinstaller"; version = "$piVer" })
+            component = [ordered]@{ type = "application"; name = "vc-cheat-typer"; version = $version }
+        }
+        components  = @()
+    }
+    $sbomPath = Join-Path $distDir "SBOM.json"
+    [IO.File]::WriteAllText($sbomPath, ($sbom | ConvertTo-Json -Depth 8),
+                            (New-Object Text.UTF8Encoding($false)))
+    Write-Host "    $sbomPath" -ForegroundColor Green
 
     Write-Host ""
     Write-Host "Verify with Git Bash:  sha256sum -c dist/VC-Cheat-Typer-SHA256.txt" -ForegroundColor Gray

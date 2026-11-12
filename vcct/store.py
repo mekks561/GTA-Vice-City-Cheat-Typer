@@ -3,6 +3,7 @@
 
 不依赖 tkinter，可在无桌面环境下测试。
 """
+
 from __future__ import annotations
 
 import copy
@@ -15,10 +16,11 @@ import uuid
 
 from .const import APP_NAME, DEFAULT_GAME, DEFAULT_SETTINGS, STORE_APP, STORE_VERSION
 from .loggingx import append_log, backup_path, data_path
+from .schema import normalize_cheat
+
 
 def _c(name, code, hotkey, group, note):
-    return {"id": uuid.uuid4().hex[:8], "name": name, "code": code,
-            "hotkey": hotkey, "group": group, "note": note, "interval_ms": 0}
+    return {"id": uuid.uuid4().hex[:8], "name": name, "code": code, "hotkey": hotkey, "group": group, "note": note, "interval_ms": 0}
 
 
 def default_cheats() -> list[dict]:
@@ -72,25 +74,8 @@ def _safe_int(value, default: int = 0, lo: int = 0, hi: int = 1000) -> int:
 
 
 def _norm_cheat(item) -> dict | None:
-    if not isinstance(item, dict):
-        return None
-    code = str(item.get("code") or "").strip().upper()
-    if not code:
-        return None
-    return {
-        "id": str(item.get("id") or uuid.uuid4().hex[:8]),
-        "name": str(item.get("name") or code),
-        "code": code,
-        "hotkey": str(item.get("hotkey") or "").strip(),
-        "group": str(item.get("group") or "自定义"),
-        "note": str(item.get("note") or ""),
-        # 单条发送速度覆盖：0 = 跟随全局（1.6 新增，可选字段，缺省即旧行为）
-        "interval_ms": _safe_int(item.get("interval_ms"), 0, 0, 300) if item.get("interval_ms") else 0,
-        # 1.9：游戏模板 / 来源包 / 是否实机验证（全部可选，缺省 = 旧行为 = 已验证的内置数据）
-        "verified": bool(item.get("verified", True)),
-        "game": str(item.get("game") or ""),
-        "source_pack": str(item.get("source_pack") or ""),
-    }
+    """配置读取入口：宽松模式（保留旧数据），唯一实现见 vcct/schema.py。"""
+    return normalize_cheat(item, source=True)
 
 
 def _norm_stats(raw) -> dict:
@@ -126,13 +111,15 @@ def _norm_games(raw) -> list[dict]:
         match_type = str(item.get("match_type") or "exe").strip().lower()
         if match_type not in ("exe", "title"):
             match_type = "exe"
-        out.append({
-            "name": str(item.get("name") or pattern),
-            "match_type": match_type,
-            "pattern": pattern,
-            "profile": str(item.get("profile") or "").strip(),
-            "enabled": bool(item.get("enabled", True)),
-        })
+        out.append(
+            {
+                "name": str(item.get("name") or pattern),
+                "match_type": match_type,
+                "pattern": pattern,
+                "profile": str(item.get("profile") or "").strip(),
+                "enabled": bool(item.get("enabled", True)),
+            }
+        )
     return out
 
 
@@ -178,7 +165,7 @@ class StoreTooNew(Exception):
 def _version_of(raw: dict) -> int:
     """推断配置版本：缺失 version 时按结构猜（v1 顶层 cheats / v2 有 profiles）。"""
     try:
-        v = int(raw.get("version"))
+        v = int(raw.get("version") or 0)
         if v >= 1:
             return v
     except (TypeError, ValueError):
@@ -193,8 +180,7 @@ def migrate_v1_to_v2(raw: dict) -> dict:
     out = copy.deepcopy(raw) if isinstance(raw, dict) else {}
     if not isinstance(out.get("profiles"), list) or not out["profiles"]:
         cheats = out.get("cheats")
-        out["profiles"] = ([{"name": "默认", "cheats": cheats}]
-                           if isinstance(cheats, list) and cheats else [])
+        out["profiles"] = [{"name": "默认", "cheats": cheats}] if isinstance(cheats, list) and cheats else []
     out["version"] = 2
     out.setdefault("active_profile", "默认")
     return out
@@ -243,26 +229,30 @@ def _norm_packs(raw) -> list[dict]:
         name = str(item.get("name") or "").strip()
         if not name:
             continue
-        out.append({
-            "name": name,
-            "author": str(item.get("author") or ""),
-            "game": str(item.get("game") or ""),
-            "pack_version": _safe_int(item.get("pack_version"), 1, 0, 9999),
-            "sha256": str(item.get("sha256") or ""),
-            "imported_at": str(item.get("imported_at") or ""),
-        })
+        out.append(
+            {
+                "name": name,
+                "author": str(item.get("author") or ""),
+                "game": str(item.get("game") or ""),
+                "pack_version": _safe_int(item.get("pack_version"), 1, 0, 9999),
+                "sha256": str(item.get("sha256") or ""),
+                "imported_at": str(item.get("imported_at") or ""),
+            }
+        )
     return out
 
 
 def _norm_targets(raw) -> list[dict]:
     """2.0 目标规则（惰性导入，避开 core.__init__ ↔ store 的循环依赖）。"""
     from .core.targets import normalize_targets
+
     return normalize_targets(raw)
 
 
 def _norm_strategies(raw) -> dict:
     """2.0 具名发送策略表（同上）。"""
     from .core.strategy import normalize_strategies
+
     return normalize_strategies(raw)
 
 
@@ -273,20 +263,22 @@ def _norm_history(raw, limit: int = 50) -> list[dict]:
         return out
     for item in raw:
         if not isinstance(item, dict):
-            continue          # 脏记录不计入上限：先过滤再截断
+            continue  # 脏记录不计入上限：先过滤再截断
         try:
             elapsed = round(float(item.get("elapsed") or 0), 3)
         except (TypeError, ValueError):
             elapsed = 0.0
-        out.append({
-            "at": str(item.get("at") or ""),
-            "name": str(item.get("name") or ""),
-            "code": str(item.get("code") or ""),
-            "profile": str(item.get("profile") or ""),
-            "result": str(item.get("result") or ""),
-            "elapsed": max(0.0, elapsed),
-            "detail": str(item.get("detail") or ""),
-        })
+        out.append(
+            {
+                "at": str(item.get("at") or ""),
+                "name": str(item.get("name") or ""),
+                "code": str(item.get("code") or ""),
+                "profile": str(item.get("profile") or ""),
+                "result": str(item.get("result") or ""),
+                "elapsed": max(0.0, elapsed),
+                "detail": str(item.get("detail") or ""),
+            }
+        )
         if len(out) >= limit:
             break
     return out[:limit]
@@ -298,10 +290,9 @@ def _norm_ui(raw) -> dict:
         return {}
     cols = raw.get("column_widths")
     geometry = str(raw.get("geometry") or "")
-    widths = ({str(k): _safe_int(v, 0, 0, 2000) for k, v in cols.items()}
-              if isinstance(cols, dict) else {})
+    widths = {str(k): _safe_int(v, 0, 0, 2000) for k, v in cols.items()} if isinstance(cols, dict) else {}
     if not geometry and not widths:
-        return {}          # 空值不写进配置，保持与 default_store 一致
+        return {}  # 空值不写进配置，保持与 default_store 一致
     return {"geometry": geometry, "column_widths": widths}
 
 
@@ -316,14 +307,14 @@ def to_v2(store: dict) -> dict:
     games 是 v2 可选字段，旧程序会安全忽略，保留即可。
     """
     keys = _v2_cheat_keys()
-    profiles = [{"name": str(p.get("name") or "默认"),
-                 "cheats": [{k: c.get(k) for k in keys} for c in (p.get("cheats") or [])]}
-                for p in (store.get("profiles") or [])]
+    profiles = [
+        {"name": str(p.get("name") or "默认"), "cheats": [{k: c.get(k) for k in keys} for c in (p.get("cheats") or [])]}
+        for p in (store.get("profiles") or [])
+    ]
     return {
         "app": STORE_APP,
         "version": 2,
-        "settings": {k: v for k, v in (store.get("settings") or {}).items()
-                     if k in DEFAULT_SETTINGS},
+        "settings": {k: v for k, v in (store.get("settings") or {}).items() if k in DEFAULT_SETTINGS},
         "active_profile": store.get("active_profile", "默认"),
         "profiles": profiles,
         "stats": store.get("stats") or {},
@@ -338,17 +329,8 @@ def export_v2(store: dict, path: str) -> None:
         json.dump(to_v2(store), fh, ensure_ascii=False, indent=2)
 
 
-def normalize_store(raw: dict) -> dict:
-    """把任意版本的配置字典归一化为 v3（纯函数，不碰磁盘：整包导入也走这里）。"""
-    if not isinstance(raw, dict):
-        raw = {}
-    migrated = migrate_store(raw)
-    settings = dict(DEFAULT_SETTINGS)
-    settings.update({k: v for k, v in (migrated.get("settings") or {}).items()
-                     if k in DEFAULT_SETTINGS})
-
-    # 方案组：v1 已由迁移链包成 profiles；v2/v3 直接读
-    raw_profiles = migrated.get("profiles")
+def _norm_profiles(raw_profiles) -> list[dict]:
+    """方案组归一化（纯函数）：读取与保存共用，避免写盘绕过字段清洗。"""
     if isinstance(raw_profiles, list) and raw_profiles:
         profiles = []
         for p in raw_profiles:
@@ -356,8 +338,7 @@ def normalize_store(raw: dict) -> dict:
                 continue
             cheats = [c for c in (_norm_cheat(i) for i in (p.get("cheats") or [])) if c]
             name = str(p.get("name") or "").strip() or "未命名"
-            profiles.append({"name": name, "cheats": cheats,
-                             "game": str(p.get("game") or DEFAULT_GAME)})
+            profiles.append({"name": name, "cheats": cheats, "game": str(p.get("game") or DEFAULT_GAME)})
     else:
         profiles = [{"name": "默认", "cheats": default_cheats(), "game": DEFAULT_GAME}]
     if not profiles:
@@ -373,6 +354,20 @@ def normalize_store(raw: dict) -> dict:
             i += 1
         p["name"] = name
         seen_names.add(name)
+    return profiles
+
+
+def normalize_store(raw: dict) -> dict:
+    """把任意版本的配置字典归一化为 v3（纯函数，不碰磁盘：整包导入也走这里）。"""
+    if not isinstance(raw, dict):
+        raw = {}
+    migrated = migrate_store(raw)
+    settings = dict(DEFAULT_SETTINGS)
+    settings.update({k: v for k, v in (migrated.get("settings") or {}).items() if k in DEFAULT_SETTINGS})
+
+    # 方案组：v1 已由迁移链包成 profiles；v2/v3 直接读
+    profiles = _norm_profiles(migrated.get("profiles"))
+    seen_names = {p["name"] for p in profiles}
 
     active = str(migrated.get("active_profile") or "").strip()
     if active not in seen_names:
@@ -386,9 +381,9 @@ def normalize_store(raw: dict) -> dict:
         "profiles": profiles,
         "stats": _norm_stats(migrated.get("stats")),
         "today": _norm_today(migrated.get("today")),
-        "games": _norm_games(migrated.get("games")),   # 1.8：可选字段，缺省空 = 不自动切
-        "packs": _norm_packs(migrated.get("packs")),   # 1.9：已安装秘籍包记录
-        "ui": _norm_ui(migrated.get("ui")),           # 1.9：窗口位置 / 列宽
+        "games": _norm_games(migrated.get("games")),  # 1.8：可选字段，缺省空 = 不自动切
+        "packs": _norm_packs(migrated.get("packs")),  # 1.9：已安装秘籍包记录
+        "ui": _norm_ui(migrated.get("ui")),  # 1.9：窗口位置 / 列宽
         "history": _norm_history(migrated.get("history")),  # 1.8-I：最近 50 次发送
         "targets": _norm_targets(migrated.get("targets")),  # 2.0：目标应用规则
         "strategies": _norm_strategies(migrated.get("strategies")),  # 2.0：具名发送策略
@@ -413,8 +408,8 @@ def default_store() -> dict:
     }
 
 
-LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）
-_FORBID_DEFAULT_SAVE = False   # 读到"来自更新版本"的配置时禁止回写，防止静默降级毁数据
+LAST_LOAD_WARNING = ""  # 最近一次读取配置时的异常说明（供界面提示）
+_FORBID_DEFAULT_SAVE = False  # 读到"来自更新版本"的配置时禁止回写，防止静默降级毁数据
 
 
 def last_load_warning() -> str:
@@ -466,23 +461,27 @@ def load_store(path: str | None = None) -> dict:
     except Exception as exc:
         moved = quarantine_corrupt(path)
         LAST_LOAD_WARNING = (
-            f"配置文件无法解析（{exc}）。" +
-            (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "原文件保留在原处。") +
-            " 已载入默认秘籍表。")
+            f"配置文件无法解析（{exc}）。"
+            + (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "原文件保留在原处。")
+            + " 已载入默认秘籍表。"
+        )
         append_log(LAST_LOAD_WARNING, "ERROR")
         return default_store()
     if not isinstance(raw, dict):
         moved = quarantine_corrupt(path)
-        LAST_LOAD_WARNING = ("配置文件结构不正确（顶层不是对象）。" +
-                             (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "") +
-                             " 已载入默认秘籍表。")
+        LAST_LOAD_WARNING = (
+            "配置文件结构不正确（顶层不是对象）。"
+            + (f"原文件已保留为 {os.path.basename(moved)}。" if moved else "")
+            + " 已载入默认秘籍表。"
+        )
         append_log(LAST_LOAD_WARNING, "ERROR")
         return default_store()
 
     found = _version_of(raw)
     if found > STORE_VERSION:
-        LAST_LOAD_WARNING = (f"配置来自更新版本（v{found}），本程序最高支持 v{STORE_VERSION}。"
-                             "请升级程序；本次只载入默认数据，且**不会回写**你的配置文件。")
+        LAST_LOAD_WARNING = (
+            f"配置来自更新版本（v{found}），本程序最高支持 v{STORE_VERSION}。请升级程序；本次只载入默认数据，且**不会回写**你的配置文件。"
+        )
         append_log(LAST_LOAD_WARNING, "ERROR")
         if path == data_path():
             _FORBID_DEFAULT_SAVE = True
@@ -506,7 +505,7 @@ def save_store(store: dict, path: str | None = None) -> None:
         "version": STORE_VERSION,
         "settings": settings,
         "active_profile": store.get("active_profile", "默认"),
-        "profiles": store.get("profiles", []),
+        "profiles": _norm_profiles(store.get("profiles")),
         "stats": store.get("stats", {}),
         "today": _norm_today(store.get("today")),
         "games": _norm_games(store.get("games")),
@@ -587,13 +586,11 @@ def filter_cheats(items: list[dict], group: str = "全部", query: str = "") -> 
         out = [c for c in out if (c.get("group") or "自定义") == group]
     q = (query or "").strip().lower()
     if q:
-        out = [c for c in out
-               if q in " ".join(str(c.get(k) or "") for k in ("name", "code", "note", "group")).lower()]
+        out = [c for c in out if q in " ".join(str(c.get(k) or "") for k in ("name", "code", "note", "group")).lower()]
     return out
 
 
-def sorted_cheats(cheats: list[dict], key: str = "count", desc: bool = True,
-                  stats: dict | None = None) -> list[dict]:
+def sorted_cheats(cheats: list[dict], key: str = "count", desc: bool = True, stats: dict | None = None) -> list[dict]:
     """按使用次数 / 最近使用排序（返回副本，不改动原列表顺序由调用方决定）。"""
     stats = stats or {}
 

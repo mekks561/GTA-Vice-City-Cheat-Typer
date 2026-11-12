@@ -33,3 +33,9 @@ path-mode.txt
 _scratch_*
 _shot*
 *.bmp
+
+# 覆盖率产物
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

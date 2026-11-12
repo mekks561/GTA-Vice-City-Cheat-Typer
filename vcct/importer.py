@@ -12,14 +12,14 @@
 空行与 `#` 开头的注释行跳过。任何不合法行都带**行号 + 原文 + 原因**返回，
 不影响其他行。解析结果只是候选，UI 预览确认后才真正写入方案。
 """
+
 from __future__ import annotations
 
 import re
 import uuid
 
 from .hotkeys import is_safe_binding, parse_combo
-
-CODE_RE = re.compile(r"^[A-Z0-9]+$")
+from .schema import CODE_RE, clean_code
 
 
 def _split(line: str) -> list[str]:
@@ -60,33 +60,34 @@ def parse_pasted(text: str) -> tuple[list[dict], list[dict]]:
             name = code
             hotkey = ""
 
-        code = code.upper().replace(" ", "")
-        if not CODE_RE.fullmatch(code) or not 2 <= len(code) <= 40:
-            errors.append({"line": lineno, "raw": raw,
-                           "reason": "秘籍代码只能是字母/数字（2~40 位），如 ASPIRINE"})
+        code = clean_code(code)
+        if not CODE_RE.fullmatch(code):
+            errors.append({"line": lineno, "raw": raw, "reason": "秘籍代码只能是字母/数字（2~40 位），如 ASPIRINE"})
             continue
         if hotkey:
             parsed = parse_combo(hotkey)
             if not parsed or not is_safe_binding(*parsed):
-                errors.append({"line": lineno, "raw": raw,
-                               "reason": f"热键 {hotkey!r} 非法或不安全（单字母键需带 Ctrl/Alt/Shift）"})
+                errors.append({"line": lineno, "raw": raw, "reason": f"热键 {hotkey!r} 非法或不安全（单字母键需带 Ctrl/Alt/Shift）"})
                 continue
             from .hotkeys import format_combo
+
             hotkey = format_combo(*parsed)
         if code in seen:
             errors.append({"line": lineno, "raw": raw, "reason": f"本批中代码 {code} 重复"})
             continue
         seen.add(code)
-        items.append({
-            "id": uuid.uuid4().hex[:8],
-            "name": name or code,
-            "code": code,
-            "hotkey": hotkey,
-            "group": "导入",
-            "note": note,
-            "interval_ms": 0,
-            "verified": False,
-            "game": "",
-            "source_pack": "",
-        })
+        items.append(
+            {
+                "id": uuid.uuid4().hex[:8],
+                "name": name or code,
+                "code": code,
+                "hotkey": hotkey,
+                "group": "导入",
+                "note": note,
+                "interval_ms": 0,
+                "verified": False,
+                "game": "",
+                "source_pack": "",
+            }
+        )
     return items, errors
