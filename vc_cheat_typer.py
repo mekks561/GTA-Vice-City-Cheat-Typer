@@ -1312,6 +1312,8 @@ class PackManagerDialog(tk.Toplevel):
         self.app = app
         self.pack: dict | None = None
         self.diff: list[dict] = []
+        self._upgrade_status: str | None = None  # last compare_pack_record status: new/upgrade/changed/same
+        self._old_record: dict | None = None  # old installed pack record for version comparison
         self.title("秘籍包管理（.vcpack）")
         self.configure(bg=C["bg"])
         self.transient(app.root)
@@ -1397,7 +1399,8 @@ class PackManagerDialog(tk.Toplevel):
                 pairs = "、".join(f"{x['code']}:{x['old']}→{x['new'] or '留空'}" for x in changed[:3])
                 avoid_note = f"　｜　自动避让 {len(changed)} 个热键冲突（{pairs}" + ("…" if len(changed) > 3 else "") + "）"
         # 1.9-H 包版本比对（纯本地，不联网）
-        status, _old = compare_pack_record(pack, self.app.store.get("packs") or [])
+        status, old = compare_pack_record(pack, self.app.store.get("packs") or [])
+        self._upgrade_status, self._old_record = status, old
         version_note = {
             "new": "首次导入这个包",
             "upgrade": "检测到同名包的**新版本**，导入后将更新本地记录",
@@ -1460,9 +1463,9 @@ class PackManagerDialog(tk.Toplevel):
         self.app.persist()
         self.app.refresh_tree()
         self.app.apply_hotkeys()
-        self.app.log(
-            f"导入秘籍包「{self.pack['name']}」：新增 {counts['added']} / 覆盖 {counts['updated']} / 跳过 {counts['skipped']}。", "ok"
-        )
+        summary = f"新增 {counts['added']} / 覆盖 {counts['updated']} / 跳过 {counts['skipped']}"
+        self.app.log(f"导入秘籍包「{self.pack['name']}」：{summary}。", "ok")
+        self._show_import_summary(counts)
         self._load_installed()
         self.pack, self.diff = None, []
         self.diff_tree.delete(*self.diff_tree.get_children())
@@ -1548,6 +1551,31 @@ class PackManagerDialog(tk.Toplevel):
                 packs.pop(int(iid))
         self.app.persist()
         self._load_installed()
+
+    def _show_import_summary(self, counts: dict):
+        """导入后升级摘要：upgrade/changed/new/same 四态差异化文案。"""
+        pack_name = self.pack["name"]
+        status = self._upgrade_status or "new"
+        old = self._old_record
+        new_v = int(self.pack.get("pack_version") or 0)
+        old_v = int((old or {}).get("pack_version") or 0)
+        body = f"新增 {counts['added']} 条　覆盖 {counts['updated']} 条　跳过 {counts['skipped']} 条"
+        if status == "upgrade":
+            title = f"✔ 升级完成：{pack_name}  v{old_v} → v{new_v}"
+            detail = f"包内容较上次导入的版本有新增/改动。{body}"
+        elif status == "changed":
+            title = f"⚠ 内容变更：{pack_name} v{new_v}"
+            detail = (
+                f"与上次导入的同版本包（v{old_v}，{((old or {}).get('imported_at') or '未知时间')}）"
+                f"校验和不同。{body}\n如非预期，建议重新核对包文件来源。"
+            )
+        elif status == "same":
+            title = f"→ 重复导入：{pack_name} v{new_v}"
+            detail = f"与上次导入的包完全一致。{body}\n数据本身未变化，仅刷新了安装记录的导入时间。"
+        else:  # new
+            title = f"✔ 导入完成：{pack_name} v{new_v}"
+            detail = f"首次导入此包。{body}"
+        messagebox.showinfo(title, detail, parent=self)
 
 
 # ----------------------------------------------------------------------------
