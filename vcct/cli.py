@@ -24,7 +24,7 @@ import time
 from .const import APP_NAME, APP_VER, STORE_VERSION
 from .core.strategy import describe_plan, normalize_strategy, plan_send, resolve_strategy
 from .core.targets import evaluate_targets
-from .packs import validate_pack
+from .packs import auto_avoid_hotkeys, diff_pack, merge_pack, pack_record, validate_pack
 from .store import export_v2, load_store
 
 
@@ -100,6 +100,107 @@ def cmd_pack_info(args) -> int:
     return 0
 
 
+def cmd_pack_validate(args) -> int:
+    """严格校验：格式 / 条目 / 校验和。exit 0 = 干净；1 = 不可用；2 = 有警告但仍可用。"""
+    with open(args.file, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    pack, warns, err = validate_pack(raw, APP_VER)
+    if args.json:
+        out = {"ok": err == "", "warnings": warns, "error": err or None}
+        if pack is not None:
+            out["pack"] = {
+                "name": pack["name"],
+                "pack_version": pack["pack_version"],
+                "cheat_count": len(pack["cheats"]),
+                "sha256": pack["sha256"],
+            }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if not err else 1
+    if err:
+        print(f"✖ {err}")
+        return 1
+    if warns:
+        for w in warns:
+            print(f"⚠ {w}")
+        return 2
+    print(f"✔ 包校验通过：{pack['name']}  v{pack['pack_version']}  {len(pack['cheats'])} 条")
+    return 0
+
+
+def cmd_pack_diff(args) -> int:
+    """对比包与本地 active profile，统计 new / conflict / same。"""
+    with open(args.file, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    pack, warns, err = validate_pack(raw, APP_VER)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    store = _store()
+    cheats = _cheats(store, args.profile)
+    rows = diff_pack(pack, cheats)
+    counts = {"new": 0, "conflict": 0, "same": 0}
+    for r in rows:
+        counts[r["status"]] += 1
+    print(f"包 {pack['name']} vs 方案「{args.profile or store.get('active_profile')}」：")
+    print(f"  新增 {counts['new']}  冲突 {counts['conflict']}  相同 {counts['same']}  共 {len(rows)}")
+    if counts["new"]:
+        print("新增：")
+        for r in rows:
+            if r["status"] == "new":
+                print(f"  + {r['code']:<30} {r['name']}")
+    if counts["conflict"]:
+        print("冲突：")
+        for r in rows:
+            if r["status"] == "conflict":
+                print(f"  ≠ {r['code']:<30} 本地={r['existing'].get('name', '')}  包={r['incoming'].get('name', '')}")
+    return 0
+
+
+def cmd_pack_import(args) -> int:
+    """把包合并进 active profile。默认覆盖冲突；加 --dry-run 只打印不落盘。"""
+    with open(args.file, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    pack, warns, err = validate_pack(raw, APP_VER)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    store = _store()
+    cheats = _cheats(store, args.profile)
+    rows = diff_pack(pack, cheats)
+
+    overwrite = not args.no_overwrite
+    if overwrite and args.avoid_hotkeys:
+        pack, changed = auto_avoid_hotkeys(pack, cheats)
+        for c in changed:
+            print(f"  自动改键：{c['code']} {c['old']} → {c['new'] or '(空)'}")
+
+    selected = [r["code"] for r in rows]
+    new_list, counts = merge_pack(cheats, pack, selected, overwrite=overwrite)
+
+    if args.dry_run:
+        print(f"（dry-run，未写盘）新增 {counts['added']}  更新 {counts['updated']}  跳过 {counts['skipped']}")
+        return 0
+
+    name = args.profile or store.get("active_profile", "默认")
+    for p in store["profiles"]:
+        if p.get("name") == name:
+            p["cheats"] = new_list
+            break
+    store["packs"] = store.get("packs") or []
+    rec = pack_record(pack)
+    existing = next((i for i, r in enumerate(store["packs"]) if r.get("name") == rec["name"]), None)
+    if existing is None:
+        store["packs"].append(rec)
+    else:
+        store["packs"][existing] = rec
+
+    from .store import save_store
+
+    save_store(store)
+    print(f"✔ 已导入 {pack['name']}：新增 {counts['added']}  更新 {counts['updated']}  跳过 {counts['skipped']}")
+    return 0
+
+
 def cmd_send(args) -> int:
     store = _store()
     code = args.code.strip().upper()
@@ -170,6 +271,21 @@ def build_parser() -> argparse.ArgumentParser:
     inf = pk_sub.add_parser("info", help="查看包信息")
     inf.add_argument("file")
     inf.set_defaults(func=cmd_pack_info)
+    val = pk_sub.add_parser("validate", help="严格校验包（exit 0=干净 / 1=不可用 / 2=有警告）")
+    val.add_argument("file")
+    val.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
+    val.set_defaults(func=cmd_pack_validate)
+    dif = pk_sub.add_parser("diff", help="对比包与本地方案，统计 new/conflict/same")
+    dif.add_argument("file")
+    dif.add_argument("--profile")
+    dif.set_defaults(func=cmd_pack_diff)
+    imp = pk_sub.add_parser("import", help="真正导入包进本地方案（默认覆盖冲突）")
+    imp.add_argument("file")
+    imp.add_argument("--profile")
+    imp.add_argument("--no-overwrite", action="store_true", help="不覆盖冲突，只导入新增")
+    imp.add_argument("--avoid-hotkeys", action="store_true", help="自动改键避免冲突（覆盖模式下）")
+    imp.add_argument("--dry-run", action="store_true", help="只打印不落盘")
+    imp.set_defaults(func=cmd_pack_import)
     s = sub.add_parser("send", help="发送一条代码（默认预演）")
     s.add_argument("code")
     s.add_argument("--target", help="目标规则名（校验前台）")

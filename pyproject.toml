@@ -40,6 +40,11 @@ select = ["E", "F", "W", "B"]
 # E501 行超限：中文注释密集，交由 line-length=140 宽限
 ignore = ["E501"]
 
+# 测试文件里常做 sys.path 注入（让 `python -m unittest discover -s tests` 也能跑），
+# import 不在文件顶部，E402 是预期行为。
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]
+
 [tool.ruff.format]
 quote-style = "double"
 line-ending = "lf"
