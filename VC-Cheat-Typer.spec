@@ -1,10 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 # P0 构建加固：
-# * upx=False —— UPX 压缩常被杀软误报，且会破坏 Authenticode 签名
+# * upx —— 默认关闭（杀软误报 / 签名启发式）；build.ps1 -EnableUPX 置 VCCT_UPX=1 才启用
 # * version  —— 由 build.ps1 生成版本资源并通过环境变量传入（缺失时退回无版本资源）
 import os
 
 _VERSION_FILE = os.environ.get("VCCT_VERSION_FILE", "")
+_UPX = os.environ.get("VCCT_UPX") == "1"
 
 
 a = Analysis(
@@ -32,7 +33,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=_UPX,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

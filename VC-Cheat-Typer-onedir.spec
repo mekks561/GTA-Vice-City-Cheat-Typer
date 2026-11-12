@@ -1,9 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 # 2.0-F：onedir 产物（启动更快，供"不介意文件夹"的用户；onefile 仍为默认便携形态）
-# P0：upx=False（避免误报 / 破坏签名）；版本资源由 build.ps1 通过 VCCT_VERSION_FILE 传入
+# P0：upx 默认关闭（避免误报 / 签名启发式），build.ps1 -EnableUPX 置 VCCT_UPX=1 才启用
+# 版本资源由 build.ps1 通过 VCCT_VERSION_FILE 传入
 import os
 
 _VERSION_FILE = os.environ.get("VCCT_VERSION_FILE", "")
+_UPX = os.environ.get("VCCT_UPX") == "1"
 
 a = Analysis(
     ['vc_cheat_typer.py'],
@@ -29,7 +31,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=_UPX,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -43,7 +45,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=False,
+    upx=_UPX,
     upx_exclude=[],
     name='VC-Cheat-Typer-onedir',
 )

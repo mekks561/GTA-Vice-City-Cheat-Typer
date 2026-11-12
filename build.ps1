@@ -7,6 +7,7 @@
 #   .\build.ps1 -SyncFromTag
 #   .\build.ps1 -Python "...\Python310\python.exe" -RuffPython "...\python.exe"
 #   .\build.ps1 -OneDir          # also build the onedir distribution (+ zip)
+#   .\build.ps1 -EnableUPX       # opt-in UPX compression (risky, see note below)
 #
 # By default this script NEVER modifies source files. -SyncFromTag is opt-in.
 # unittest/PyInstaller need a Python WITH tkinter; ruff may be in another
@@ -19,7 +20,8 @@ param(
     [string]$RuffPython = "python",
     [switch]$SkipVerify,
     [switch]$SyncFromTag,
-    [switch]$OneDir
+    [switch]$OneDir,
+    [switch]$EnableUPX
 )
 
 $ErrorActionPreference = "Stop"
@@ -111,9 +113,16 @@ VSVersionInfo(
     }
 
     Write-Host "[3/3] PyInstaller + SHA256..." -ForegroundColor Gray
-    # 三个 .spec 已统一 upx=False；显式打一条让构建者一眼看到加固状态
-    # （UPX 常被杀软误报 / 破坏 Authenticode 签名 / 易被替换植入，禁用是默认安全选择）
-    Write-Host "    UPX : disabled (spec 里 upx=False；如需启用请改 spec 文件并自担杀软误报 / 签名破坏风险)" -ForegroundColor Yellow
+    # All three .spec files keep upx off unless VCCT_UPX=1. UPX-packed binaries
+    # routinely trip antivirus heuristics and upset signature-based reputation,
+    # so this is an explicit opt-in the builder owns.
+    if ($EnableUPX) {
+        $env:VCCT_UPX = "1"
+        Write-Host "    UPX : ENABLED (-EnableUPX). Expect AV false positives." -ForegroundColor Yellow
+    } else {
+        $env:VCCT_UPX = "0"
+        Write-Host "    UPX : disabled (default; pass -EnableUPX to opt in)" -ForegroundColor Gray
+    }
     # PyInstaller calls os.remove on the old dist exe. Some managed environments
     # intercept that with a Recycle-Bin hook and fail, so move the old file aside
     # instead of deleting it.
