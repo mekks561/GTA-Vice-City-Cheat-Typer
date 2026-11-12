@@ -22,10 +22,33 @@ import sys
 import time
 
 from .const import APP_NAME, APP_VER, STORE_VERSION
-from .core.strategy import describe_plan, normalize_strategy, plan_send, resolve_strategy
+from .core.strategy import describe_plan, normalize_strategies, normalize_strategy, plan_send, resolve_strategy
 from .core.targets import evaluate_targets
 from .packs import auto_avoid_hotkeys, diff_pack, merge_pack, pack_record, validate_pack
-from .store import export_v2, load_store
+from .store import export_v2, load_store, save_store
+
+# 具名策略文件格式（独立 JSON，与 pack 风格一致）
+_STRAT_FORMAT = "vcct-strategies"
+_STRAT_VERSION = 1
+_STRAT_LIMIT_IMPORT = 100  # 导入时上限比 store 默认的 20 宽松，避免策略迁移时被截断
+
+
+def _load_strat_file(path: str) -> tuple[dict | None, str]:
+    """加载并初步校验策略文件；返回 (strategies_dict 或 None, error_msg)。"""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"文件无法读取或不是合法 JSON：{exc}"
+    if not isinstance(raw, dict):
+        return None, "顶层不是 JSON 对象"
+    fmt = raw.get("format")
+    if fmt != _STRAT_FORMAT:
+        return None, f"格式标记不对：format={fmt!r}，期望 {_STRAT_FORMAT!r}"
+    strat = raw.get("strategies")
+    if not isinstance(strat, dict) or not strat:
+        return None, "strategies 字段缺失、不是对象或为空"
+    return strat, ""
 
 
 def _store():
@@ -76,10 +99,72 @@ def cmd_targets(_args) -> int:
 
 
 def cmd_strategies(_args) -> int:
+    """list：具名策略速览（无子命令时 fallback 到这个）。"""
     named = _store().get("strategies") or {}
-    print(f"具名策略 {len(named)} 个（默认 fixed，与 1.9.1 参数一致）：")
+    print(f"具名策略 {len(named)} 个（默认 fixed）：")
     for name, spec in named.items():
         print(f"  {name}: {json.dumps(spec, ensure_ascii=False)}")
+    return 0
+
+
+def cmd_strategies_export(args) -> int:
+    named = _store().get("strategies") or {}
+    if not named:
+        print("本地方案还没有具名策略，导出文件将只有 format 头。")
+    out = {"format": _STRAT_FORMAT, "version": _STRAT_VERSION, "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"), "strategies": named}
+    path = getattr(args, "file", None) or "strategies.json"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=2)
+    print(f"✔ 已导出 {len(named)} 个策略到 {path}")
+    return 0
+
+
+def cmd_strategies_validate(args) -> int:
+    strat, err = _load_strat_file(args.file)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    normalized = normalize_strategies(strat, limit=_STRAT_LIMIT_IMPORT)
+    dropped = len(strat) - len(normalized)
+    print(f"✔ 策略文件通过：{len(normalized)} 个合法策略" + (f"（{dropped} 个非法名被丢弃）" if dropped else ""))
+    if dropped:
+        return 2
+    return 0
+
+
+def cmd_strategies_import(args) -> int:
+    strat, err = _load_strat_file(args.file)
+    if err:
+        print(f"✖ {err}")
+        return 1
+    normalized = normalize_strategies(strat, limit=_STRAT_LIMIT_IMPORT)
+    if not normalized:
+        print("✖ 文件里没有任何合法策略。")
+        return 1
+
+    store = _store()
+    existing = store.get("strategies") or {}
+    if getattr(args, "replace", False):
+        merged = dict(normalized)
+        overwritten = len(existing)
+        mode_note = f"替换模式：原有 {overwritten} 个策略全部丢弃"
+    else:
+        merged = dict(existing)
+        overwritten = 0
+        for name in normalized:
+            if name in merged:
+                overwritten += 1
+            merged[name] = normalized[name]
+        mode_note = f"合并模式：新增 {len(normalized) - overwritten} / 覆盖 {overwritten}"
+
+    print(f"将要 {mode_note}（目标总数 {len(merged)}）")
+    if getattr(args, "dry_run", False):
+        print("（dry-run，未写盘）")
+        return 0
+
+    store["strategies"] = merged
+    save_store(store)
+    print(f"✔ 策略已导入并保存（当前 store 共 {len(merged)} 个具名策略）")
     return 0
 
 
@@ -277,7 +362,23 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--profile")
     q.set_defaults(func=cmd_list)
     sub.add_parser("targets", help="列出目标规则").set_defaults(func=cmd_targets)
-    sub.add_parser("strategies", help="列出具名发送策略").set_defaults(func=cmd_strategies)
+    sub.add_parser("strategies", help="列出具名发送策略（等同 `strategies list`）").set_defaults(func=cmd_strategies)
+    # 2.0 具名策略文件操作（独立 JSON，格式 vcct-strategies v1）
+    sg = sub.add_parser("strategy", help="具名策略文件操作")
+    sg_sub = sg.add_subparsers(dest="strategy_command")
+    sg_ls = sg_sub.add_parser("list", help="本地 store 里的具名策略（等同 `strategies`）")
+    sg_ls.set_defaults(func=cmd_strategies)
+    sg_ex = sg_sub.add_parser("export", help="把本地 store 的具名策略导出成 JSON 文件")
+    sg_ex.add_argument("file", nargs="?", help="输出路径（默认 strategies.json）")
+    sg_ex.set_defaults(func=cmd_strategies_export)
+    sg_vl = sg_sub.add_parser("validate", help="校验策略文件格式")
+    sg_vl.add_argument("file")
+    sg_vl.set_defaults(func=cmd_strategies_validate)
+    sg_im = sg_sub.add_parser("import", help="导入策略文件进本地 store（默认合并，同名覆盖）")
+    sg_im.add_argument("file")
+    sg_im.add_argument("--replace", action="store_true", help="替换模式：先清空现有策略再导入")
+    sg_im.add_argument("--dry-run", action="store_true", help="只打印不落盘")
+    sg_im.set_defaults(func=cmd_strategies_import)
     d = sub.add_parser("diagnose", help="一键体检（环境 / 权限 / 前台 / send 历史）")
     d.add_argument("--no-probe", action="store_true", help="跳过注入探针（探针会抢前台约 1 秒）")
     d.set_defaults(func=cmd_diagnose)

@@ -20,7 +20,15 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vcct.cli import cmd_pack_validate, cmd_pack_diff, cmd_pack_import, main
+from vcct.cli import (
+    cmd_pack_diff,
+    cmd_pack_import,
+    cmd_pack_validate,
+    cmd_strategies_export,
+    cmd_strategies_import,
+    cmd_strategies_validate,
+    main,
+)
 from vcct.packs import make_pack
 
 
@@ -142,6 +150,117 @@ class TestPackImport(unittest.TestCase):
             self.assertEqual(len(saved), 1)
             self.assertEqual(len(saved[0]["profiles"][0]["cheats"]), 2)
             self.assertEqual(len(saved[0]["packs"]), 1)
+        finally:
+            os.unlink(path)
+
+
+class TestStrategiesCli(unittest.TestCase):
+    """具名策略 export / validate / import 三命令回归。"""
+
+    def _fake_store(self, strategies=None):
+        return {
+            "active_profile": "默认",
+            "profiles": [{"name": "默认", "cheats": []}],
+            "settings": {},
+            "strategies": strategies or {},
+        }
+
+    def _make_strat_file(self, path, strategies):
+        doc = {
+            "format": "vcct-strategies",
+            "version": 1,
+            "strategies": strategies,
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False)
+
+    def test_export_writes_format_header(self):
+        fake = self._fake_store({"快速连发": {"kind": "burst", "interval_ms": 50}})
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            out_path = f.name
+        try:
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                code = cmd_strategies_export(_FakeArgs(file=out_path))
+            self.assertEqual(code, 0)
+            with open(out_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual(data["format"], "vcct-strategies")
+            self.assertEqual(data["version"], 1)
+            self.assertIn("快速连发", data["strategies"])
+        finally:
+            os.unlink(out_path)
+
+    def test_validate_good_file_exit_0(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_strat_file(path, {"快速连发": {"kind": "burst", "interval_ms": 50}})
+            code = cmd_strategies_validate(_FakeArgs(file=path))
+            self.assertEqual(code, 0)
+        finally:
+            os.unlink(path)
+
+    def test_validate_bad_format_exit_1(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"format": "wrong-format", "strategies": {}}, fh)
+            code = cmd_strategies_validate(_FakeArgs(file=path))
+            self.assertEqual(code, 1)
+        finally:
+            os.unlink(path)
+
+    def test_import_dry_run_does_not_save(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_strat_file(path, {"快速连发": {"kind": "burst", "interval_ms": 50}})
+            fake = self._fake_store(strategies={"已有策略": {"kind": "fixed"}})
+            save_mock = mock.Mock()
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", save_mock):
+                    code = cmd_strategies_import(_FakeArgs(
+                        file=path, replace=False, dry_run=True))
+            self.assertEqual(code, 0)
+            save_mock.assert_not_called()
+        finally:
+            os.unlink(path)
+
+    def test_import_merge_overwrites_same_name(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_strat_file(path, {
+                "快速连发": {"kind": "burst", "interval_ms": 50},
+                "新策略": {"kind": "adaptive", "interval_ms": 100},
+            })
+            fake = self._fake_store(strategies={"快速连发": {"kind": "fixed", "interval_ms": 200}})
+            saved = []
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", lambda s: saved.append(s)):
+                    code = cmd_strategies_import(_FakeArgs(
+                        file=path, replace=False, dry_run=False))
+            self.assertEqual(code, 0)
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0]["strategies"]["快速连发"]["kind"], "burst")  # 被覆盖
+            self.assertIn("新策略", saved[0]["strategies"])                          # 新增
+        finally:
+            os.unlink(path)
+
+    def test_import_replace_clears_existing(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            path = f.name
+        try:
+            self._make_strat_file(path, {"新策略": {"kind": "adaptive", "interval_ms": 100}})
+            fake = self._fake_store(strategies={"已有策略": {"kind": "fixed"}})
+            saved = []
+            with mock.patch("vcct.cli.load_store", return_value=fake):
+                with mock.patch("vcct.cli.save_store", lambda s: saved.append(s)):
+                    code = cmd_strategies_import(_FakeArgs(
+                        file=path, replace=True, dry_run=False))
+            self.assertEqual(code, 0)
+            self.assertEqual(list(saved[0]["strategies"].keys()), ["新策略"])
         finally:
             os.unlink(path)
 
