@@ -10,6 +10,7 @@
   触发的一次性复制（`copy_config_to`），且目标已存在时拒绝覆盖。
 * 只读目录（Program Files）写不了 marker 时仍在本进程内生效，并给出提示。
 """
+
 from __future__ import annotations
 
 import os
@@ -71,8 +72,7 @@ def mode_persisted() -> bool:
 
 
 def user_data_root() -> str:
-    base = (os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-            or os.path.expanduser("~"))
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
     return os.path.join(base, APP_DATA_DIRNAME)
 
 

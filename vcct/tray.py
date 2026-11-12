@@ -14,6 +14,7 @@
 * 任何一步失败都只把 `available` 置 False 并回调 on_error——托盘失败
   不该弄垮主程序，主界面自动回落"关闭即退出"。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -27,7 +28,7 @@ if IS_WIN:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
-    WM_APP_TRAY = 0x8001            # WM_APP+1：托盘回调消息
+    WM_APP_TRAY = 0x8001  # WM_APP+1：托盘回调消息
     WM_NULL = 0x0000
     WM_QUIT = 0x0012
     WM_CLOSE = 0x0010
@@ -63,8 +64,7 @@ class _NOTIFYICONDATAW(ctypes.Structure):
 
 
 if IS_WIN:
-    WNDPROC = ctypes.WINFUNCTYPE(
-        ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
     # 64 位下 wparam/lparam 常是超 int 范围的大数，必须显式声明签名（否则 OverflowError）
     user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.DefWindowProcW.restype = ctypes.c_longlong
@@ -94,9 +94,19 @@ if IS_WIN:
     user32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
     user32.RegisterWindowMessageW.restype = wintypes.UINT
     user32.CreateWindowExW.argtypes = [
-        wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
-        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-        wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HMENU,
+        wintypes.HINSTANCE,
+        ctypes.c_void_p,
+    ]
     user32.CreateWindowExW.restype = wintypes.HWND
     user32.GetMessageW.argtypes = [_PMSG, wintypes.HWND, wintypes.UINT, wintypes.UINT]
     user32.GetMessageW.restype = ctypes.c_int
@@ -109,8 +119,7 @@ if IS_WIN:
     user32.LoadIconW.restype = wintypes.HICON
     user32.CreatePopupMenu.argtypes = []
     user32.CreatePopupMenu.restype = wintypes.HMENU
-    user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t,
-                                   wintypes.LPCWSTR]
+    user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
     user32.AppendMenuW.restype = wintypes.BOOL
     user32.DestroyMenu.argtypes = [wintypes.HMENU]
     user32.DestroyMenu.restype = wintypes.BOOL
@@ -118,23 +127,33 @@ if IS_WIN:
     user32.GetCursorPos.restype = wintypes.BOOL
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.SetForegroundWindow.restype = wintypes.BOOL
-    user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int,
-                                      ctypes.c_int, ctypes.c_int, wintypes.HWND,
-                                      ctypes.c_void_p]
+    user32.TrackPopupMenu.argtypes = [
+        wintypes.HMENU,
+        wintypes.UINT,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        ctypes.c_void_p,
+    ]
     user32.TrackPopupMenu.restype = ctypes.c_int
-    shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD,
-                                          ctypes.POINTER(_NOTIFYICONDATAW)]
+    shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(_NOTIFYICONDATAW)]
     shell32.Shell_NotifyIconW.restype = wintypes.BOOL
     shell32.ExtractIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT]
     shell32.ExtractIconW.restype = wintypes.HICON
 
     class _WNDCLASSW(ctypes.Structure):
         _fields_ = [
-            ("style", wintypes.UINT), ("lpfnWndProc", WNDPROC),
-            ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
-            ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HICON),
-            ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HBRUSH),
-            ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR),
+            ("style", wintypes.UINT),
+            ("lpfnWndProc", WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wintypes.HINSTANCE),
+            ("hIcon", wintypes.HICON),
+            ("hCursor", wintypes.HANDLE),
+            ("hbrBackground", wintypes.HBRUSH),
+            ("lpszMenuName", wintypes.LPCWSTR),
+            ("lpszClassName", wintypes.LPCWSTR),
         ]
 
 
@@ -189,7 +208,7 @@ class TrayIcon:
                     elif lp == WM_RBUTTONUP:
                         self._popup_menu(hwnd)
                     return 0
-                if msg == self._taskbar_msg:      # Explorer 重启 → 图标丢了，补回来
+                if msg == self._taskbar_msg:  # Explorer 重启 → 图标丢了，补回来
                     self._add_icon(hwnd)
                     return 0
                 if msg == WM_CLOSE:
@@ -199,7 +218,7 @@ class TrayIcon:
                 pass
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
-        self._proc = WNDPROC(wnd_proc)          # 引用必须活着，否则回调变野指针
+        self._proc = WNDPROC(wnd_proc)  # 引用必须活着，否则回调变野指针
         # 类名按实例唯一：多个 CheatApp / 测试实例并存、或上一个实例刚 close 时，
         # 绝不复用别人注册过的窗口类（2.1 修复）。
         cls_name = f"VCCT_TrayWnd_{id(self):x}_{threading.get_ident()}"
@@ -212,8 +231,20 @@ class TrayIcon:
             self.on_error(f"托盘窗口类注册失败（错误码 {ctypes.get_last_error()}）")
             return
 
-        hwnd = user32.CreateWindowExW(0, cls_name, "VCCT tray", 0x00000000,  # WS_OVERLAPPED
-                                      0, 0, 0, 0, None, None, hinst, None)
+        hwnd = user32.CreateWindowExW(
+            0,
+            cls_name,
+            "VCCT tray",
+            0x00000000,  # WS_OVERLAPPED
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            hinst,
+            None,
+        )
         if not hwnd:
             user32.UnregisterClassW(cls_name, hinst)
             self._failed = True
@@ -248,7 +279,7 @@ class TrayIcon:
             buf = ctypes.create_unicode_buffer(260)
             if kernel32.GetModuleFileNameW(None, buf, 260):
                 icon = shell32.ExtractIconW(hinst, buf.value, 0)
-                if icon and icon != 1:          # 1 = 未找到图标
+                if icon and icon != 1:  # 1 = 未找到图标
                     return icon
         except Exception:
             pass
@@ -273,16 +304,14 @@ class TrayIcon:
         menu = user32.CreatePopupMenu()
         user32.AppendMenuW(menu, MF_STRING, IDM_SHOW, "显示主界面")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-        user32.AppendMenuW(menu, MF_STRING, IDM_PAUSE,
-                           "恢复热键" if paused else "⏸ 暂停热键")
+        user32.AppendMenuW(menu, MF_STRING, IDM_PAUSE, "恢复热键" if paused else "⏸ 暂停热键")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, IDM_EXIT, "退出")
         pt = wintypes.POINT()
         user32.GetCursorPos(ctypes.byref(pt))
         # 经典坑：不先 SetForegroundWindow，菜单点外面不会消失
         user32.SetForegroundWindow(hwnd)
-        cmd = user32.TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
-                                    pt.x, pt.y, 0, hwnd, None)
+        cmd = user32.TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, None)
         user32.PostMessageW(hwnd, WM_NULL, 0, 0)
         user32.DestroyMenu(menu)
         if cmd == IDM_SHOW:

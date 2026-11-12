@@ -8,6 +8,7 @@
 * 默认没有任何钩子注册 → 发送行为与 1.9.1 完全一致（G2.0 gate）。
 * 前置钩子返回 False 可以否决本次发送；钩子自身抛异常不会影响发送（只记录）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -69,10 +70,9 @@ class HookBus:
                 self.events.append(HookEvent("after", name, False, str(exc)))
 
 
-def make_switch_window_hook(get_hwnd: Callable[[], int],
-                            activate: Callable[[int], bool],
-                            get_foreground: Callable[[], int] | None = None
-                            ) -> tuple[BeforeHook, AfterHook]:
+def make_switch_window_hook(
+    get_hwnd: Callable[[], int], activate: Callable[[int], bool], get_foreground: Callable[[], int] | None = None
+) -> tuple[BeforeHook, AfterHook]:
     """内置示例①：发送前切到目标窗口、发送后回切（**默认不注册**）。
 
     三个函数全部由调用方注入，hooks 模块因此不 import ctypes / winapi。
@@ -97,6 +97,7 @@ def make_switch_window_hook(get_hwnd: Callable[[], int],
 
 def make_log_hook(sink: Callable[[str], None]) -> tuple[BeforeHook, AfterHook]:
     """内置示例②：纯日志钩子（不碰窗口，适合 CLI / 无桌面环境）。"""
+
     def before(_target: dict, cheat: dict):
         sink(f"准备发送：{cheat.get('code', '')}")
         return None

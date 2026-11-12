@@ -22,26 +22,45 @@
 平台相关模块（`winapi` / `hotkeys` / `tray` / `importer`）用 PEP 562 惰性导出，
 因此 `import vcct.core` 在无桌面、甚至非 Windows 环境下也不会去加载 Win32 DLL。
 """
+
 from __future__ import annotations
 
 from ..const import APP_NAME, APP_VER, DEFAULT_GAME, DEFAULT_SETTINGS, PRESETS, STORE_VERSION
-from ..sender import (SendCancelled, SendError, SendParams, default_hold, type_text)
+from ..sender import SendCancelled, SendError, SendParams, default_hold, type_text
 from ..store import (
-    bundle_payload, default_store, evaluate_game_rules, export_v2, load_store,
-    match_game_rule, migrate_store, normalize_store, parse_bundle, save_store, to_v2,
+    bundle_payload,
+    default_store,
+    evaluate_game_rules,
+    export_v2,
+    load_store,
+    match_game_rule,
+    migrate_store,
+    normalize_store,
+    parse_bundle,
+    save_store,
+    to_v2,
 )
-from ..packs import (
-    auto_avoid_hotkeys, compare_pack_record, diff_pack, make_pack, merge_pack,
-    validate_pack,
-)
+from ..packs import auto_avoid_hotkeys, compare_pack_record, diff_pack, make_pack, merge_pack, validate_pack
 from ..templates import TEMPLATE_INFO, TEMPLATE_NAMES, template_cheats, template_preset
 from .targets import (
-    MATCH_TYPES, Target, evaluate_targets, match_target, normalize_targets,
-    parse_target_spec, resolve_target, targets_from_games,
+    MATCH_TYPES,
+    Target,
+    evaluate_targets,
+    match_target,
+    normalize_targets,
+    parse_target_spec,
+    resolve_target,
+    targets_from_games,
 )
 from .strategy import (
-    STRATEGY_KINDS, SendStrategy, describe_plan, normalize_strategies,
-    normalize_strategy, plan_send, resolve_strategy, should_retry,
+    STRATEGY_KINDS,
+    SendStrategy,
+    describe_plan,
+    normalize_strategies,
+    normalize_strategy,
+    plan_send,
+    resolve_strategy,
+    should_retry,
 )
 from .hooks import HookBus, HookEvent, make_log_hook, make_switch_window_hook
 
@@ -63,28 +82,79 @@ def __getattr__(name: str):
     if name not in _LAZY:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
+
     module_name, attr = _LAZY[name]
     return getattr(importlib.import_module(module_name, __name__), attr)
 
 
 def core_modules() -> tuple[str, ...]:
     """供架构守卫测试使用：core 依赖的实现层模块清单。"""
-    return ("vcct.const", "vcct.sender", "vcct.store", "vcct.packs",
-            "vcct.loggingx", "vcct.templates", "vcct.core.targets",
-            "vcct.core.strategy", "vcct.core.hooks")
+    return (
+        "vcct.const",
+        "vcct.sender",
+        "vcct.store",
+        "vcct.packs",
+        "vcct.loggingx",
+        "vcct.templates",
+        "vcct.core.targets",
+        "vcct.core.strategy",
+        "vcct.core.hooks",
+    )
 
 
 __all__ = [
-    "APP_NAME", "APP_VER", "DEFAULT_GAME", "DEFAULT_SETTINGS", "PRESETS", "STORE_VERSION",
-    "SendCancelled", "SendError", "SendParams", "default_hold", "type_text",
-    "bundle_payload", "default_store", "evaluate_game_rules", "export_v2", "load_store",
-    "match_game_rule", "migrate_store", "normalize_store", "parse_bundle", "save_store",
-    "to_v2", "auto_avoid_hotkeys", "compare_pack_record", "diff_pack", "make_pack",
-    "merge_pack", "validate_pack", "TEMPLATE_INFO", "TEMPLATE_NAMES", "template_cheats",
-    "template_preset", "MATCH_TYPES", "Target", "evaluate_targets", "match_target",
-    "normalize_targets", "parse_target_spec", "resolve_target", "targets_from_games",
-    "STRATEGY_KINDS", "SendStrategy", "describe_plan", "normalize_strategies",
-    "normalize_strategy", "plan_send", "resolve_strategy", "should_retry",
-    "HookBus", "HookEvent", "make_log_hook", "make_switch_window_hook",
-    "core_modules", *_LAZY.keys(),
+    "APP_NAME",
+    "APP_VER",
+    "DEFAULT_GAME",
+    "DEFAULT_SETTINGS",
+    "PRESETS",
+    "STORE_VERSION",
+    "SendCancelled",
+    "SendError",
+    "SendParams",
+    "default_hold",
+    "type_text",
+    "bundle_payload",
+    "default_store",
+    "evaluate_game_rules",
+    "export_v2",
+    "load_store",
+    "match_game_rule",
+    "migrate_store",
+    "normalize_store",
+    "parse_bundle",
+    "save_store",
+    "to_v2",
+    "auto_avoid_hotkeys",
+    "compare_pack_record",
+    "diff_pack",
+    "make_pack",
+    "merge_pack",
+    "validate_pack",
+    "TEMPLATE_INFO",
+    "TEMPLATE_NAMES",
+    "template_cheats",
+    "template_preset",
+    "MATCH_TYPES",
+    "Target",
+    "evaluate_targets",
+    "match_target",
+    "normalize_targets",
+    "parse_target_spec",
+    "resolve_target",
+    "targets_from_games",
+    "STRATEGY_KINDS",
+    "SendStrategy",
+    "describe_plan",
+    "normalize_strategies",
+    "normalize_strategy",
+    "plan_send",
+    "resolve_strategy",
+    "should_retry",
+    "HookBus",
+    "HookEvent",
+    "make_log_hook",
+    "make_switch_window_hook",
+    "core_modules",
+    *_LAZY.keys(),
 ]

@@ -3,6 +3,7 @@
 
 这是唯一允许直接调用 Win32 API 的模块；其余模块通过它间接使用。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -27,13 +28,7 @@ ULONG_PTR = ctypes.c_size_t
 
 
 class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", wt.WORD),
-        ("wScan", wt.WORD),
-        ("dwFlags", wt.DWORD),
-        ("time", wt.DWORD),
-        ("dwExtraInfo", ULONG_PTR),
-    ]
+    _fields_ = [("wVk", wt.WORD), ("wScan", wt.WORD), ("dwFlags", wt.DWORD), ("time", wt.DWORD), ("dwExtraInfo", ULONG_PTR)]
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -107,12 +102,7 @@ if IS_WIN:
     kernel32.GetCurrentThreadId.restype = wt.DWORD
     kernel32.OpenProcess.argtypes = (wt.DWORD, wt.BOOL, wt.DWORD)
     kernel32.OpenProcess.restype = wt.HANDLE
-    kernel32.QueryFullProcessImageNameW.argtypes = (
-        wt.HANDLE,
-        wt.DWORD,
-        wt.LPWSTR,
-        ctypes.POINTER(wt.DWORD),
-    )
+    kernel32.QueryFullProcessImageNameW.argtypes = (wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD))
     kernel32.QueryFullProcessImageNameW.restype = wt.BOOL
     kernel32.CloseHandle.argtypes = (wt.HANDLE,)
     kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wt.BOOL, wt.LPCWSTR)
@@ -226,10 +216,17 @@ _reg("BACKSLASH", 0xDC, "\\")
 _reg("GRAVE", 0xC0, "`")
 
 MODIFIER_VKS = {
-    0x11: "ctrl", 0xA2: "ctrl", 0xA3: "ctrl",
-    0x10: "shift", 0xA0: "shift", 0xA1: "shift",
-    0x12: "alt", 0xA4: "alt", 0xA5: "alt",
-    0x5B: "win", 0x5C: "win",
+    0x11: "ctrl",
+    0xA2: "ctrl",
+    0xA3: "ctrl",
+    0x10: "shift",
+    0xA0: "shift",
+    0xA1: "shift",
+    0x12: "alt",
+    0xA4: "alt",
+    0xA5: "alt",
+    0x5B: "win",
+    0x5C: "win",
 }
 BARE_SAFE_VKS = set(range(0x70, 0x88))  # F1-F24：不需要修饰键也不会被当成打字吞掉
 
@@ -326,8 +323,13 @@ def is_key_down(vk: int) -> bool:
 
 # --- 游戏窗口自动检测 --------------------------------------------------------
 KNOWN_GAME_EXES = (
-    "gta-vc.exe", "gta3-vc.exe", "gtavc.exe", "vicecity.exe", "playgtavc.exe",
-    "gtavc-wing64-shipping.exe", "grand theft auto vice city.exe",
+    "gta-vc.exe",
+    "gta3-vc.exe",
+    "gtavc.exe",
+    "vicecity.exe",
+    "playgtavc.exe",
+    "gtavc-wing64-shipping.exe",
+    "grand theft auto vice city.exe",
 )
 
 
@@ -478,10 +480,18 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
     user32.UnregisterClassW.restype = wt.BOOL
 
     class _WC(ctypes.Structure):
-        _fields_ = [("style", wt.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
-                    ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE), ("hIcon", wt.HICON),
-                    ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
-                    ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR)]
+        _fields_ = [
+            ("style", wt.UINT),
+            ("lpfnWndProc", WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wt.HINSTANCE),
+            ("hIcon", wt.HICON),
+            ("hCursor", wt.HANDLE),
+            ("hbrBackground", wt.HBRUSH),
+            ("lpszMenuName", wt.LPCWSTR),
+            ("lpszClassName", wt.LPCWSTR),
+        ]
 
     wc = _WC()
     wc.lpfnWndProc = cb
@@ -491,11 +501,21 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
     if not user32.RegisterClassW(ctypes.byref(wc)):
         return False, ""
     user32.CreateWindowExW.restype = wt.HWND
-    user32.CreateWindowExW.argtypes = (wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int,
-                                       ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HWND, wt.HMENU,
-                                       wt.HINSTANCE, ctypes.c_void_p)
-    hwnd = user32.CreateWindowExW(0, cls_name, "注入自检", 0x00CF0000,
-                                  220, 220, 360, 96, None, None, None, None)
+    user32.CreateWindowExW.argtypes = (
+        wt.DWORD,
+        wt.LPCWSTR,
+        wt.LPCWSTR,
+        wt.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wt.HWND,
+        wt.HMENU,
+        wt.HINSTANCE,
+        ctypes.c_void_p,
+    )
+    hwnd = user32.CreateWindowExW(0, cls_name, "注入自检", 0x00CF0000, 220, 220, 360, 96, None, None, None, None)
     if not hwnd:
         user32.UnregisterClassW(cls_name, None)
         return False, ""
@@ -546,7 +566,7 @@ def raw_char_probe(text: str, hold_ms: int = 25, gap_ms: int = 45) -> tuple[bool
         user32.DestroyWindow(hwnd)
     except Exception:
         pass
-    user32.UnregisterClassW(cls_name, None)   # 不留野指针类名
+    user32.UnregisterClassW(cls_name, None)  # 不留野指针类名
     return got_fg, "".join(events)
 
 
@@ -556,12 +576,12 @@ def enable_dpi_awareness() -> None:
     if not IS_WIN:
         return
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)   # PROCESS_SYSTEM_DPI_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
         return
     except Exception:
         pass
     try:
-        user32.SetProcessDPIAware()                      # Win7/8 回退
+        user32.SetProcessDPIAware()  # Win7/8 回退
     except Exception:
         pass
 
@@ -621,8 +641,7 @@ def process_elevated(pid: int) -> bool | None:
             try:
                 val = ctypes.c_int(0)
                 ret = wt.DWORD(0)
-                ok = adv.GetTokenInformation(tok, _TokenElevation, ctypes.byref(val),
-                                             ctypes.sizeof(val), ctypes.byref(ret))
+                ok = adv.GetTokenInformation(tok, _TokenElevation, ctypes.byref(val), ctypes.sizeof(val), ctypes.byref(ret))
                 return bool(val.value) if ok else None
             finally:
                 k32.CloseHandle(tok)
@@ -643,7 +662,6 @@ def self_elevated() -> bool:
 def shell_execute_runas(path: str, params: str = "", cwd: str = "") -> int:
     """以管理员身份重启自身（UAC 提权）。返回 ShellExecute 的返回值，>32 表示成功。"""
     try:
-        return int(ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", path, params or None, cwd or None, 1))
+        return int(ctypes.windll.shell32.ShellExecuteW(None, "runas", path, params or None, cwd or None, 1))
     except Exception:
         return 0

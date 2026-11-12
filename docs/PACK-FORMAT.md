@@ -97,10 +97,10 @@ Python 等价实现：
 ```python
 import hashlib, json
 
+
 def sign(pack: dict) -> str:
     payload = {k: v for k, v in pack.items() if k != "sha256"}
-    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
-                     separators=(",", ":")).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 ```
 

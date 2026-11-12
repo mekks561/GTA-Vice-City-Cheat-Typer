@@ -8,6 +8,7 @@
   * 例外：`if IS_WIN:` 的 DLL 加载/原型块强制归入 winapi（其前一个节点是 const 的 IS_WIN）；
   * 主文件保留 UI 与入口，并插入显式 import 作为兼容层。
 """
+
 from __future__ import annotations
 
 import ast
@@ -18,37 +19,118 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "vc_cheat_typer.py")
 
 TARGET = {}
-for _n in ("APP_NAME", "APP_VER", "IS_WIN", "STORE_VERSION", "STORE_APP",
-           "DEFAULT_SETTINGS", "PRESETS", "PAUSE_ID", "PAUSE_HID", "C", "WIN_W"):
+for _n in (
+    "APP_NAME",
+    "APP_VER",
+    "IS_WIN",
+    "STORE_VERSION",
+    "STORE_APP",
+    "DEFAULT_SETTINGS",
+    "PRESETS",
+    "PAUSE_ID",
+    "PAUSE_HID",
+    "C",
+    "WIN_W",
+):
     TARGET[_n] = "const"
 
-for _n in ("ULONG_PTR", "KEYBDINPUT", "MOUSEINPUT", "HARDWAREINPUT", "_INPUTUNION", "INPUT",
-           "INPUT_KEYBOARD", "KEYEVENTF_KEYUP", "KEYEVENTF_SCANCODE",
-           "WM_HOTKEY", "WM_QUIT", "WM_APP", "WM_APP_RELOAD", "MOD_ALT",
-           "ERROR_HOTKEY_ALREADY_REGISTERED", "ERROR_ACCESS_DENIED",
-           "WS_EX_TOPMOST", "WS_EX_TOOLWINDOW", "WS_EX_NOACTIVATE", "GWL_EXSTYLE", "GA_ROOT",
-           "get_window_exstyle", "add_window_exstyle", "_key_item", "_send", "press_key",
-           "foreground_info", "is_key_down", "KNOWN_GAME_EXES", "find_game_window",
-           "ImeGuard", "force_foreground", "_RAW_PROBE_CLASS", "raw_char_probe",
-           "enable_dpi_awareness", "ui_scale",
-           # VK 表属于 Win32 虚拟键码域；且 raw_char_probe 需要它，
-           # 放 hotkeys 会让 hotkeys <-> winapi 循环导入
-           "VK_BY_NAME", "NAME_BY_VK", "_reg", "MODIFIER_VKS", "BARE_SAFE_VKS"):
+for _n in (
+    "ULONG_PTR",
+    "KEYBDINPUT",
+    "MOUSEINPUT",
+    "HARDWAREINPUT",
+    "_INPUTUNION",
+    "INPUT",
+    "INPUT_KEYBOARD",
+    "KEYEVENTF_KEYUP",
+    "KEYEVENTF_SCANCODE",
+    "WM_HOTKEY",
+    "WM_QUIT",
+    "WM_APP",
+    "WM_APP_RELOAD",
+    "MOD_ALT",
+    "ERROR_HOTKEY_ALREADY_REGISTERED",
+    "ERROR_ACCESS_DENIED",
+    "WS_EX_TOPMOST",
+    "WS_EX_TOOLWINDOW",
+    "WS_EX_NOACTIVATE",
+    "GWL_EXSTYLE",
+    "GA_ROOT",
+    "get_window_exstyle",
+    "add_window_exstyle",
+    "_key_item",
+    "_send",
+    "press_key",
+    "foreground_info",
+    "is_key_down",
+    "KNOWN_GAME_EXES",
+    "find_game_window",
+    "ImeGuard",
+    "force_foreground",
+    "_RAW_PROBE_CLASS",
+    "raw_char_probe",
+    "enable_dpi_awareness",
+    "ui_scale",
+    # VK 表属于 Win32 虚拟键码域；且 raw_char_probe 需要它，
+    # 放 hotkeys 会让 hotkeys <-> winapi 循环导入
+    "VK_BY_NAME",
+    "NAME_BY_VK",
+    "_reg",
+    "MODIFIER_VKS",
+    "BARE_SAFE_VKS",
+):
     TARGET[_n] = "winapi"
 
-for _n in ("format_combo", "parse_combo", "combo_signature", "is_safe_binding",
-           "HotkeyEngine", "build_bindings", "candidate_combos", "pick_free_combo"):
+for _n in (
+    "format_combo",
+    "parse_combo",
+    "combo_signature",
+    "is_safe_binding",
+    "HotkeyEngine",
+    "build_bindings",
+    "candidate_combos",
+    "pick_free_combo",
+):
     TARGET[_n] = "hotkeys"
 
-for _n in ("_c", "default_cheats", "LAST_LOAD_WARNING", "_safe_int", "_norm_cheat",
-           "_norm_stats", "_norm_today", "touch_today", "normalize_store", "default_store",
-           "quarantine_corrupt", "load_store", "save_store", "bundle_payload", "parse_bundle",
-           "bump_stats", "filter_cheats", "sorted_cheats"):
+for _n in (
+    "_c",
+    "default_cheats",
+    "LAST_LOAD_WARNING",
+    "_safe_int",
+    "_norm_cheat",
+    "_norm_stats",
+    "_norm_today",
+    "touch_today",
+    "normalize_store",
+    "default_store",
+    "quarantine_corrupt",
+    "load_store",
+    "save_store",
+    "bundle_payload",
+    "parse_bundle",
+    "bump_stats",
+    "filter_cheats",
+    "sorted_cheats",
+):
     TARGET[_n] = "store"
 
-for _n in ("LOG_MAX_BYTES", "LOG_KEEP", "_log_dir_cache", "_crash_dialog_open",
-           "app_dir", "data_path", "backup_path", "_writable", "log_dir", "log_file",
-           "_rotate_log", "append_log", "_show_crash_dialog", "install_crash_hooks"):
+for _n in (
+    "LOG_MAX_BYTES",
+    "LOG_KEEP",
+    "_log_dir_cache",
+    "_crash_dialog_open",
+    "app_dir",
+    "data_path",
+    "backup_path",
+    "_writable",
+    "log_dir",
+    "log_file",
+    "_rotate_log",
+    "append_log",
+    "_show_crash_dialog",
+    "install_crash_hooks",
+):
     TARGET[_n] = "loggingx"
 
 HEADERS = {
@@ -157,16 +239,17 @@ def main() -> int:
     # 迁移完成后重跑必须显式 --force，且应先把 SRC 还原到迁移前的提交。
     pkg_dir = os.path.join(ROOT, "vcct")
     if os.path.isdir(pkg_dir) and "--force" not in sys.argv:
-        print("vcct/ 已存在：本脚本是一次性迁移工具，重跑会覆盖手写改动。\n"
-              "如确需重跑：git checkout <迁移前提交> -- vc_cheat_typer.py && python tools/split_1_7.py --force",
-              file=sys.stderr)
+        print(
+            "vcct/ 已存在：本脚本是一次性迁移工具，重跑会覆盖手写改动。\n"
+            "如确需重跑：git checkout <迁移前提交> -- vc_cheat_typer.py && python tools/split_1_7.py --force",
+            file=sys.stderr,
+        )
         return 2
 
     with open(SRC, encoding="utf-8") as fh:
         text = fh.read()
     lines = text.splitlines(keepends=True)
-    nodes = sorted((n for n in ast.parse(text).body if hasattr(n, "lineno")),
-                   key=lambda n: n.lineno)
+    nodes = sorted((n for n in ast.parse(text).body if hasattr(n, "lineno")), key=lambda n: n.lineno)
 
     owners = []
     prev_owner = None
@@ -174,7 +257,7 @@ def main() -> int:
         names = node_names(nd)
         seg = ast.get_source_segment(text, nd) or ""
         if isinstance(nd, ast.If) and "IS_WIN" in seg.split("\n")[0]:
-            owners.append("winapi")          # DLL 加载 / ctypes 原型块
+            owners.append("winapi")  # DLL 加载 / ctypes 原型块
             prev_owner = "winapi"
             continue
         if names:
@@ -195,52 +278,56 @@ def main() -> int:
 
     buckets = {"const": [], "winapi": [], "hotkeys": [], "store": [], "loggingx": [], None: []}
     for start, end, owner in blocks:
-        buckets[owner].append("".join(lines[start - 1:end]))
+        buckets[owner].append("".join(lines[start - 1 : end]))
 
     # --- 搬运后必须的语义保持适配（每条都断言命中，防止源码漂移后静默失效）---
     ADAPT = {
         "loggingx": [
             # 1) app_dir：移入 vcct/ 后 __file__ 深了一层，源码运行时必须回到项目根
-            ('def app_dir() -> str:\n'
-             '    """程序所在目录：打包后是 exe 所在目录，源码运行时是本文件所在目录。"""\n'
-             '    return os.path.dirname(os.path.abspath('
-             'sys.argv[0] if getattr(sys, "frozen", False) else __file__))',
-             'def app_dir() -> str:\n'
-             '    """程序所在目录：打包后是 exe 所在目录，源码运行时是项目根目录（vcct/ 的上一级）。"""\n'
-             '    if getattr(sys, "frozen", False):\n'
-             '        return os.path.dirname(os.path.abspath(sys.executable))\n'
-             '    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))'),
+            (
+                "def app_dir() -> str:\n"
+                '    """程序所在目录：打包后是 exe 所在目录，源码运行时是本文件所在目录。"""\n'
+                "    return os.path.dirname(os.path.abspath("
+                'sys.argv[0] if getattr(sys, "frozen", False) else __file__))',
+                "def app_dir() -> str:\n"
+                '    """程序所在目录：打包后是 exe 所在目录，源码运行时是项目根目录（vcct/ 的上一级）。"""\n'
+                '    if getattr(sys, "frozen", False):\n'
+                "        return os.path.dirname(os.path.abspath(sys.executable))\n"
+                "    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))",
+            ),
             # 2) 崩溃弹窗延迟导入 tkinter：本模块要能在无桌面环境被导入
-            ('    _crash_dialog_open = True\n    try:\n        root = tk.Tk()',
-             '    _crash_dialog_open = True\n'
-             '    # 延迟导入：本模块要能在无 tkinter / 无桌面环境（含 CI）下被导入\n'
-             '    import tkinter as tk\n'
-             '    from tkinter import messagebox\n'
-             '    try:\n        root = tk.Tk()'),
+            (
+                "    _crash_dialog_open = True\n    try:\n        root = tk.Tk()",
+                "    _crash_dialog_open = True\n"
+                "    # 延迟导入：本模块要能在无 tkinter / 无桌面环境（含 CI）下被导入\n"
+                "    import tkinter as tk\n"
+                "    from tkinter import messagebox\n"
+                "    try:\n        root = tk.Tk()",
+            ),
         ],
         "store": [
             # 3) 可变全局不能用 from-import 取值，补一个读取函数
-            ('LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）',
-             'LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）\n'
-             '\n'
-             '\n'
-             'def last_load_warning() -> str:\n'
-             '    """读取最近一次加载告警。\n'
-             '\n'
-             '    必须用函数而不是 `from vcct.store import LAST_LOAD_WARNING`：\n'
-             '    load_store 会重新绑定这个全局，按值导入拿到的永远是导入那一刻的空串。\n'
-             '    """\n'
-             '    return LAST_LOAD_WARNING'),
+            (
+                'LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）',
+                'LAST_LOAD_WARNING = ""   # 最近一次读取配置时的异常说明（供界面提示）\n'
+                "\n"
+                "\n"
+                "def last_load_warning() -> str:\n"
+                '    """读取最近一次加载告警。\n'
+                "\n"
+                "    必须用函数而不是 `from vcct.store import LAST_LOAD_WARNING`：\n"
+                "    load_store 会重新绑定这个全局，按值导入拿到的永远是导入那一刻的空串。\n"
+                '    """\n'
+                "    return LAST_LOAD_WARNING",
+            )
         ],
         "main": [
-            ("self.load_warning = LAST_LOAD_WARNING",
-             "self.load_warning = last_load_warning()"),
-            ('if LAST_LOAD_WARNING:\n'
-             '            messagebox.showerror("备份不可用", LAST_LOAD_WARNING, parent=self.root)',
-             'if last_load_warning():\n'
-             '            messagebox.showerror("备份不可用", last_load_warning(), parent=self.root)'),
-            ("bool(quarantined) and bool(LAST_LOAD_WARNING)",
-             "bool(quarantined) and bool(last_load_warning())"),
+            ("self.load_warning = LAST_LOAD_WARNING", "self.load_warning = last_load_warning()"),
+            (
+                'if LAST_LOAD_WARNING:\n            messagebox.showerror("备份不可用", LAST_LOAD_WARNING, parent=self.root)',
+                'if last_load_warning():\n            messagebox.showerror("备份不可用", last_load_warning(), parent=self.root)',
+            ),
+            ("bool(quarantined) and bool(LAST_LOAD_WARNING)", "bool(quarantined) and bool(last_load_warning())"),
         ],
     }
 
@@ -271,7 +358,9 @@ def main() -> int:
         print("ERROR: 未找到 import 锚点", file=sys.stderr)
         return 1
 
-    shim = marker + '''
+    shim = (
+        marker
+        + """
 # --- 1.7 兼容层：实现已搬入 vcct/，此处按名导入以保持既有调用与测试不变 ---
 from vcct.const import (  # noqa: F401
     APP_NAME, APP_VER, C, DEFAULT_SETTINGS, IS_WIN, PAUSE_HID, PAUSE_ID, PRESETS,
@@ -297,7 +386,8 @@ from vcct.store import (  # noqa: F401
 from vcct.loggingx import (  # noqa: F401
     append_log, backup_path, data_path, install_crash_hooks, log_dir, log_file,
 )
-'''
+"""
+    )
 
     rest = rest.replace(marker, shim, 1)
     with open(SRC, "w", encoding="utf-8") as fh:

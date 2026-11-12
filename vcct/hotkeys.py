@@ -3,6 +3,7 @@
 
 键名/键码表属 Win32 域，放在 winapi 里（raw_char_probe 也要用）。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -14,9 +15,21 @@ import time
 
 from .const import PAUSE_HID, PAUSE_ID
 from .winapi import (
-    BARE_SAFE_VKS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, NAME_BY_VK, VK_BY_NAME,
-    WM_APP_RELOAD, WM_HOTKEY, WM_QUIT, kernel32, user32,
+    BARE_SAFE_VKS,
+    MOD_ALT,
+    MOD_CONTROL,
+    MOD_NOREPEAT,
+    MOD_SHIFT,
+    MOD_WIN,
+    NAME_BY_VK,
+    VK_BY_NAME,
+    WM_APP_RELOAD,
+    WM_HOTKEY,
+    WM_QUIT,
+    kernel32,
+    user32,
 )
+
 
 def format_combo(mods: int, vk: int) -> str:
     parts = []
@@ -67,7 +80,6 @@ def combo_signature(text: str):
 def is_safe_binding(mods: int, vk: int) -> bool:
     """无修饰键时只允许 F1-F24，否则会把正常打字吃掉"""
     return mods != 0 or vk in BARE_SAFE_VKS
-
 
 
 # ----------------------------------------------------------------------------
@@ -148,8 +160,7 @@ class HotkeyEngine:
         self.events.put(("hotkeys", results, id_map))
 
 
-def build_bindings(cheats: list[dict], pause_combo: str = "",
-                   include_cheats: bool = True) -> tuple[list, dict]:
+def build_bindings(cheats: list[dict], pause_combo: str = "", include_cheats: bool = True) -> tuple[list, dict]:
     """构造热键注册表。
 
     返回 (bindings, conflicts)：
@@ -214,8 +225,7 @@ def candidate_combos() -> list[str]:
     return out
 
 
-def pick_free_combo(cheats: list[dict], pause_combo: str = "", avoid=(),
-                    exclude_id: str = "") -> str:
+def pick_free_combo(cheats: list[dict], pause_combo: str = "", avoid=(), exclude_id: str = "") -> str:
     """按候选序列找第一个未被占用（其他秘籍 / 暂停键 / 已知不可用）的组合键。
 
     没有空闲键时返回空串。avoid 用于记录"注册时报 1409 说明系统真的占着"的键。

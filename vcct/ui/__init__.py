@@ -10,20 +10,35 @@
 因此引入本层不破坏 `CONTRIBUTING.md` 的三条架构硬约束，也不改变
 「零运行时依赖 / 配置不丢 / 发布必带 SHA256 / 暂停可中断 / 不联网」五条不变量。
 """
-from .theme import (
-    DENSITIES, THEMES, PALETTES, Tokens, apply_theme, check_contrast,
-    classic_palette, contrast_ratio, tokens,
-)
-from .components import (
-    card, empty_state, nav_button, pill, separator, status_center, top_bar,
-)
+
+from .theme import DENSITIES, THEMES, PALETTES, Tokens, apply_theme, check_contrast, classic_palette, contrast_ratio, tokens
+from .components import card, empty_state, nav_button, pill, separator, status_center, top_bar
 from .commands import Command, CommandPalette, CommandRegistry, default_commands
 from .shell import NAV_ITEMS, STATUS_KEYS, STATUS_LABELS, NovaShell
 
 __all__ = [
-    "DENSITIES", "THEMES", "PALETTES", "Tokens", "apply_theme", "check_contrast",
-    "classic_palette", "contrast_ratio", "tokens",
-    "card", "empty_state", "nav_button", "pill", "separator", "status_center", "top_bar",
-    "Command", "CommandPalette", "CommandRegistry", "default_commands",
-    "NAV_ITEMS", "STATUS_KEYS", "STATUS_LABELS", "NovaShell",
+    "DENSITIES",
+    "THEMES",
+    "PALETTES",
+    "Tokens",
+    "apply_theme",
+    "check_contrast",
+    "classic_palette",
+    "contrast_ratio",
+    "tokens",
+    "card",
+    "empty_state",
+    "nav_button",
+    "pill",
+    "separator",
+    "status_center",
+    "top_bar",
+    "Command",
+    "CommandPalette",
+    "CommandRegistry",
+    "default_commands",
+    "NAV_ITEMS",
+    "STATUS_KEYS",
+    "STATUS_LABELS",
+    "NovaShell",
 ]

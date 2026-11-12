@@ -5,6 +5,7 @@
 这是"核心业务流程零改动"的边界。所有方法用 `getattr` 惰性解析，找不到时
 命令自动禁用而不是抛异常（对旧配置/回退模式宽容）。
 """
+
 from __future__ import annotations
 
 import tkinter as tk
@@ -19,8 +20,8 @@ class Command:
     title: str
     group: str
     keywords: str
-    action_name: str          # CheatApp 上的方法名
-    haystack: str             # 预计算的小写检索串（R3 性能）
+    action_name: str  # CheatApp 上的方法名
+    haystack: str  # 预计算的小写检索串（R3 性能）
 
 
 class CommandRegistry:
@@ -28,8 +29,7 @@ class CommandRegistry:
         self.app = app
         self._items: list[Command] = []
 
-    def add(self, id_: str, title: str, group: str, action_name: str,
-            keywords: str = "") -> None:
+    def add(self, id_: str, title: str, group: str, action_name: str, keywords: str = "") -> None:
         hay = f"{id_} {title} {group} {keywords}".lower()
         self._items.append(Command(id_, title, group, keywords, action_name, hay))
 
@@ -103,8 +103,7 @@ def default_commands(app) -> CommandRegistry:
 class CommandPalette(tk.Toplevel):
     """Ctrl+K 面板：输入即筛、↑↓ 选择、Enter 执行、Esc 关闭；不阻塞主线程。"""
 
-    def __init__(self, master, registry: CommandRegistry, tk_tokens: Tokens,
-                 on_status=None, scale: float = 1.0):
+    def __init__(self, master, registry: CommandRegistry, tk_tokens: Tokens, on_status=None, scale: float = 1.0):
         super().__init__(master)
         self.registry = registry
         self.tk_tokens = tk_tokens
@@ -119,26 +118,36 @@ class CommandPalette(tk.Toplevel):
         pad = tk_tokens.space("md")
 
         self.var_query = tk.StringVar()
-        self.entry = tk.Entry(self, textvariable=self.var_query,
-                              relief="flat", font=tk_tokens.font(),
-                              bg=tk_tokens["card"], fg=tk_tokens["text"],
-                              insertbackground=tk_tokens["accent"],
-                              highlightthickness=1,
-                              highlightbackground=tk_tokens["line"],
-                              highlightcolor=tk_tokens["accent"])
+        self.entry = tk.Entry(
+            self,
+            textvariable=self.var_query,
+            relief="flat",
+            font=tk_tokens.font(),
+            bg=tk_tokens["card"],
+            fg=tk_tokens["text"],
+            insertbackground=tk_tokens["accent"],
+            highlightthickness=1,
+            highlightbackground=tk_tokens["line"],
+            highlightcolor=tk_tokens["accent"],
+        )
         self.entry.pack(fill="x", padx=pad, pady=(pad, tk_tokens.space("sm")), ipady=6)
 
-        self.listbox = tk.Listbox(self, relief="flat", bd=0,
-                                  bg=tk_tokens["card"], fg=tk_tokens["text"],
-                                  selectbackground=tk_tokens["sidebar_active"],
-                                  selectforeground=tk_tokens["text"],
-                                  font=tk_tokens.font(), activestyle="none")
+        self.listbox = tk.Listbox(
+            self,
+            relief="flat",
+            bd=0,
+            bg=tk_tokens["card"],
+            fg=tk_tokens["text"],
+            selectbackground=tk_tokens["sidebar_active"],
+            selectforeground=tk_tokens["text"],
+            font=tk_tokens.font(),
+            activestyle="none",
+        )
         self.listbox.pack(fill="both", expand=True, padx=pad, pady=(0, pad))
 
-        tk.Label(self, text="↑↓ 选择 · Enter 执行 · Esc 关闭",
-                 bg=tk_tokens["panel"], fg=tk_tokens["muted"],
-                 font=tk_tokens.font("small")).pack(anchor="w", padx=pad,
-                                                    pady=(0, tk_tokens.space("sm")))
+        tk.Label(
+            self, text="↑↓ 选择 · Enter 执行 · Esc 关闭", bg=tk_tokens["panel"], fg=tk_tokens["muted"], font=tk_tokens.font("small")
+        ).pack(anchor="w", padx=pad, pady=(0, tk_tokens.space("sm")))
 
         self.var_query.trace_add("write", lambda *_: self._refresh())
         self.entry.bind("<Return>", lambda e: self._run())

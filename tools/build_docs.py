@@ -7,6 +7,7 @@
 刻意只支持 Markdown 的一个小子集（标题/表格/代码块/列表/引用/行内格式），
 够用即可；生成的 HTML 无外链、无 JS，双击即可离线打开。
 """
+
 from __future__ import annotations
 
 import html
@@ -77,16 +78,14 @@ def render(md: str) -> str:
                 out.append(f"<h{lvl}>{inline(m.group(2))}</h{lvl}>")
                 i += 1
                 continue
-        if line.lstrip().startswith("|") and i + 1 < len(lines) \
-                and re.match(r"^\s*\|?[\s:|-]+\|", lines[i + 1]):
+        if line.lstrip().startswith("|") and i + 1 < len(lines) and re.match(r"^\s*\|?[\s:|-]+\|", lines[i + 1]):
             rows = []
             while i < len(lines) and lines[i].lstrip().startswith("|"):
                 rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
                 i += 1
             head = rows[0]
             body = rows[2:] if len(rows) > 1 else []
-            out.append("<table><thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head)
-                       + "</tr></thead><tbody>")
+            out.append("<table><thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head) + "</tr></thead><tbody>")
             for r in body:
                 out.append("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>")
             out.append("</tbody></table>")
@@ -95,12 +94,10 @@ def render(md: str) -> str:
             ordered = bool(re.match(r"^\s*\d+\.\s+", line))
             tag = "ol" if ordered else "ul"
             items = []
-            while i < len(lines) and (re.match(r"^\s*[-*+]\s+", lines[i])
-                                      or re.match(r"^\s*\d+\.\s+", lines[i])):
+            while i < len(lines) and (re.match(r"^\s*[-*+]\s+", lines[i]) or re.match(r"^\s*\d+\.\s+", lines[i])):
                 items.append(re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", lines[i]))
                 i += 1
-            out.append(f"<{tag}>" + "".join(f"<li>{inline(x)}</li>" for x in items)
-                       + f"</{tag}>")
+            out.append(f"<{tag}>" + "".join(f"<li>{inline(x)}</li>" for x in items) + f"</{tag}>")
             continue
         if line.lstrip().startswith(">"):
             buf = []
@@ -116,8 +113,7 @@ def render(md: str) -> str:
         # 段落：合并到下一个空行/块级元素
         buf = [line.strip()]
         i += 1
-        while i < len(lines) and lines[i].strip() and not re.match(
-                r"^\s*(#{1,6}\s|\||[-*+]\s|\d+\.\s|>|```|---)", lines[i]):
+        while i < len(lines) and lines[i].strip() and not re.match(r"^\s*(#{1,6}\s|\||[-*+]\s|\d+\.\s|>|```|---)", lines[i]):
             buf.append(lines[i].strip())
             i += 1
         out.append("<p>" + inline(" ".join(buf)) + "</p>")
@@ -127,21 +123,21 @@ def render(md: str) -> str:
 
 
 def shell(title: str, nav: str, body: str) -> str:
-    return ("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
-            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
-            "<header><div class=\"wrap\"><h1>VC-Cheat-Typer · 文档站</h1>"
-            f"<nav>{nav}</nav></div></header>"
-            f"<div class=\"wrap\"><article>{body}</article>"
-            "<div class=\"foot\">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div>"
-            "</div></body></html>")
+    return (
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
+        '<header><div class="wrap"><h1>VC-Cheat-Typer · 文档站</h1>'
+        f"<nav>{nav}</nav></div></header>"
+        f'<div class="wrap"><article>{body}</article>'
+        '<div class="foot">离线文档 · 由 tools/build_docs.py 生成 · 无外链依赖</div>'
+        "</div></body></html>"
+    )
 
 
 def main() -> int:
     os.makedirs(SITE, exist_ok=True)
-    sources = [("README.md", "首页 / README"),
-               ("README.en.md", "English README"),
-               ("CONTRIBUTING.md", "CONTRIBUTING")]
+    sources = [("README.md", "首页 / README"), ("README.en.md", "English README"), ("CONTRIBUTING.md", "CONTRIBUTING")]
     for name in sorted(os.listdir(DOCS)):
         if name.endswith(".md"):
             sources.append((f"docs/{name}", name[:-3]))

@@ -4,6 +4,7 @@
 重要：GTA III / GTA SA 模板只录入**公开流传的秘籍文本**，未在本工具上实机验证，
 每条 `verified=False`，UI 灰显标注。切模板 = 换整套秘籍 + 参数，方案之间互不污染。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -94,11 +95,19 @@ _GTASA = [
 ]
 
 
-def _entry(name: str, code: str, group: str, game: str, verified: bool,
-           note: str = "") -> dict:
-    return {"id": uuid.uuid4().hex[:8], "name": name, "code": code, "hotkey": "",
-            "group": group, "note": note, "interval_ms": 0,
-            "verified": verified, "game": game, "source_pack": ""}
+def _entry(name: str, code: str, group: str, game: str, verified: bool, note: str = "") -> dict:
+    return {
+        "id": uuid.uuid4().hex[:8],
+        "name": name,
+        "code": code,
+        "hotkey": "",
+        "group": group,
+        "note": note,
+        "interval_ms": 0,
+        "verified": verified,
+        "game": game,
+        "source_pack": "",
+    }
 
 
 def template_cheats(name: str) -> list[dict]:
@@ -125,6 +134,7 @@ def template_cheats(name: str) -> list[dict]:
 def template_preset(name: str) -> dict:
     """模板对应的参数预设覆盖（空 dict = 不改参数）。"""
     from .const import PRESETS
+
     info = TEMPLATE_INFO.get(name) or {}
     preset = info.get("preset")
     return dict(PRESETS[preset]) if preset in PRESETS else {}

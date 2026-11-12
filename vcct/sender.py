@@ -22,13 +22,14 @@ IME 守卫、统计上报缠在一起，无法单测；「取消」也就无处�
 5. `pre_delay` 阶段同样可中断（这条最容易被漏：触发后 180ms 里按暂停必须立刻停）；
 6. 不直接调用 Win32：键码解析由 `lookup_vk` 注入。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-SLEEP_SLICE_MS = 20     # 可中断睡眠的切片长度：越小越灵敏，越小唤醒越频繁
-_VK_LSHIFT = 0xA0       # 左 Shift 的虚拟键码（只在 sender 内部用，不依赖 winapi）
+SLEEP_SLICE_MS = 20  # 可中断睡眠的切片长度：越小越灵敏，越小唤醒越频繁
+_VK_LSHIFT = 0xA0  # 左 Shift 的虚拟键码（只在 sender 内部用，不依赖 winapi）
 
 
 @dataclass(frozen=True)
@@ -36,14 +37,15 @@ class SendParams:
     """一次发送的全部参数（纯数据，不可变，可安全跨线程传递）。"""
 
     code: str
-    interval_ms: int = 45      # 每个字符的总间隔（含 hold）
-    hold_ms: int = 25          # 按下到抬起的保持时间，必须大于游戏帧间隔
-    pre_delay_ms: int = 180    # 触发后先等一会，让手指离开修饰键
-    uppercase: bool = False    # 是否按住 Shift 发送（大写）
+    interval_ms: int = 45  # 每个字符的总间隔（含 hold）
+    hold_ms: int = 25  # 按下到抬起的保持时间，必须大于游戏帧间隔
+    pre_delay_ms: int = 180  # 触发后先等一会，让手指离开修饰键
+    uppercase: bool = False  # 是否按住 Shift 发送（大写）
 
     @classmethod
-    def for_code(cls, code: str, interval_ms: int = 45, pre_delay_ms: int = 180,
-                 uppercase: bool = False, hold_ms: Optional[int] = None) -> "SendParams":
+    def for_code(
+        cls, code: str, interval_ms: int = 45, pre_delay_ms: int = 180, uppercase: bool = False, hold_ms: Optional[int] = None
+    ) -> "SendParams":
         """由"代码 + 间隔"构造参数，把 hold 的换算规则收在一处。
 
         hold 取间隔的一半并夹在 8~60ms：太短会被低帧率漏掉，
@@ -115,12 +117,16 @@ def _sleep_ms(ms: float, stop, sleep: Callable[[float], None], sent: int) -> Non
         remain -= step
 
 
-def type_text(params: SendParams, stop=None, *,
-              send_key: Callable[[int, bool], None],
-              sleep: Callable[[float], None],
-              lookup_vk: Callable[[str], Optional[int]],
-              check_target: Optional[Callable[[], bool]] = None,
-              on_progress: Optional[Callable[[int, int], None]] = None) -> int:
+def type_text(
+    params: SendParams,
+    stop=None,
+    *,
+    send_key: Callable[[int, bool], None],
+    sleep: Callable[[float], None],
+    lookup_vk: Callable[[str], Optional[int]],
+    check_target: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> int:
     """按 `params` 敲出整段代码，返回实际发送的字符数。
 
     参数

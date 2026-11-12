@@ -97,10 +97,10 @@ vc_cheat_typer.py  入口壳：import + CheatApp + HotkeyCapture + CheatDialog +
 **shim 兼容**：`vc_cheat_typer.py` 顶部保留
 
 ```python
-from vcct.const import *      # noqa: F401,F403
-from vcct.store import *      # noqa: F401,F403
-from vcct.hotkeys import *    # noqa: F401,F403
-from vcct.winapi import *     # noqa: F401,F403
+from vcct.const import *  # noqa: F401,F403
+from vcct.store import *  # noqa: F401,F403
+from vcct.hotkeys import *  # noqa: F401,F403
+from vcct.winapi import *  # noqa: F401,F403
 ```
 
 目的：`run.bat`、PyInstaller `--name`、README 路径、`tests/test_core.py` 的 45 条旧 import **全部不用改**；同时加一条断言测试 `vc_cheat_typer.parse_combo is vcct.hotkeys.parse_combo`，防止 shim 与实现分叉。
@@ -116,13 +116,19 @@ class SendParams:
     pre_delay_ms: int = 180
     uppercase: bool = False
 
+
 class SendCancelled(Exception):
     def __init__(self, sent: int, total: int): ...
 
-def type_text(p: SendParams, stop: threading.Event, *,
-              send_key,                     # (vk:int, down:bool) -> None
-              sleep=time.sleep,
-              on_progress=None) -> int:
+
+def type_text(
+    p: SendParams,
+    stop: threading.Event,
+    *,
+    send_key,  # (vk:int, down:bool) -> None
+    sleep=time.sleep,
+    on_progress=None,
+) -> int:
     """逐字符注入。stop 置位即中止；中止时保证已按下的键全部抬起，抛 SendCancelled。"""
 ```
 

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """1.7 日志与崩溃钩子；2.0 起实现层零 tkinter；2.1 起数据目录由 paths.py 统一决定。"""
+
 from __future__ import annotations
 
 import os
@@ -45,8 +46,7 @@ def log_dir() -> str:
     if _writable(preferred):
         _log_dir_cache = preferred
         return preferred
-    fallback = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
-                            APP_NAME, "logs")
+    fallback = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), APP_NAME, "logs")
     _writable(fallback)
     _log_dir_cache = fallback
     return fallback
@@ -107,13 +107,11 @@ def install_crash_hooks(show_dialog=None) -> None:
         global _crash_dialog_open
         text = "".join(traceback.format_exception(exc_type, exc, tb))
         append_log(f"未捕获异常（{thread_name}）\n{text}", "ERROR")
-        if _crash_dialog_open:      # 防止异常里再弹异常，无限递归
+        if _crash_dialog_open:  # 防止异常里再弹异常，无限递归
             return
         _crash_dialog_open = True
         try:
-            notify(f"{APP_NAME} 遇到问题",
-                   f"程序捕获到未处理的异常，已写入日志：\n{log_file()}\n\n"
-                   f"{exc_type.__name__}: {exc}")
+            notify(f"{APP_NAME} 遇到问题", f"程序捕获到未处理的异常，已写入日志：\n{log_file()}\n\n{exc_type.__name__}: {exc}")
         except Exception:
             pass
         finally:
@@ -123,8 +121,7 @@ def install_crash_hooks(show_dialog=None) -> None:
         handle(exc_type, exc, tb, "main")
 
     def thread_hook(args):
-        handle(args.exc_type, args.exc_value, args.exc_traceback,
-               getattr(args.thread, "name", "thread"))
+        handle(args.exc_type, args.exc_value, args.exc_traceback, getattr(args.thread, "name", "thread"))
 
     sys.excepthook = main_hook
     if hasattr(threading, "excepthook"):

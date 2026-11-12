@@ -12,6 +12,7 @@
 安全约定：`send` 默认只**预演**参数，不碰键盘；必须显式 `--execute` 才会真正注入，
 避免脚本误触发时把代码打进当前正在编辑的窗口。带 `--target` 时会校验前台窗口。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,9 +67,11 @@ def cmd_targets(_args) -> int:
     print(f"共 {len(targets)} 条目标规则：")
     for t in targets:
         flag = "启用" if t.get("enabled") else "停用"
-        print(f"  [{flag}] {t.get('name')}  {t.get('match_type')}:{t.get('pattern')}"
-              f"  → 方案={t.get('profile_ref') or '沿用'} 策略={t.get('strategy_ref') or '沿用'}"
-              f"  IME={t.get('ime_policy')} 前台={t.get('require_foreground')}")
+        print(
+            f"  [{flag}] {t.get('name')}  {t.get('match_type')}:{t.get('pattern')}"
+            f"  → 方案={t.get('profile_ref') or '沿用'} 策略={t.get('strategy_ref') or '沿用'}"
+            f"  IME={t.get('ime_policy')} 前台={t.get('require_foreground')}"
+        )
     return 0
 
 
@@ -87,8 +90,7 @@ def cmd_pack_info(args) -> int:
     if err:
         print(f"✖ {err}")
         return 1
-    print(f"包：{pack['name']}  v{pack['pack_version']}  作者={pack['author'] or '—'}"
-          f"  游戏={pack['game'] or '—'}")
+    print(f"包：{pack['name']}  v{pack['pack_version']}  作者={pack['author'] or '—'}  游戏={pack['game'] or '—'}")
     print(f"条目 {len(pack['cheats'])} 条；导出时间 {pack['exported_at'] or '—'}")
     print("前 10 条：" if len(pack["cheats"]) > 10 else "全部条目：")
     for c in pack["cheats"][:10]:
@@ -123,6 +125,7 @@ def cmd_send(args) -> int:
 
     if target:
         from .winapi import foreground_info
+
         title, exe = foreground_info()
         hit = evaluate_targets([target], title, exe)
         if not hit:
@@ -136,12 +139,12 @@ def cmd_send(args) -> int:
 
     from .winapi import ImeGuard, release_modifiers, send_key, user32, vk_for_char
     from .sender import type_text
+
     hwnd = user32.GetForegroundWindow() or 0
     sp = plan_send(strategy, code, base_interval, base_pre, attempt=0)
     release_modifiers()
     with ImeGuard(hwnd, True):
-        sent = type_text(sp, None, send_key=send_key, sleep=time.sleep,
-                         lookup_vk=vk_for_char)
+        sent = type_text(sp, None, send_key=send_key, sleep=time.sleep, lookup_vk=vk_for_char)
     print(f"✔ 已发送 {sent}/{len(code)} 字符")
     return 0
 

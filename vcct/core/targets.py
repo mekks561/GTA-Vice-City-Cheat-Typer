@@ -10,6 +10,7 @@
 兼容性：`targets` 是 v3 可选字段，缺省空 = 完全沿用 1.8/1.9 的 games 行为；
 `targets_from_games` 提供单向升级（纯函数，不写盘）。
 """
+
 from __future__ import annotations
 
 import re
@@ -54,21 +55,22 @@ def normalize_targets(raw) -> list[dict]:
         ime = str(item.get("ime_policy") or "disable").strip().lower()
         if ime not in IME_POLICIES:
             ime = "disable"
-        out.append(Target(
-            name=str(item.get("name") or pattern),
-            match_type=match_type,
-            pattern=pattern,
-            require_foreground=bool(item.get("require_foreground", True)),
-            ime_policy=ime,
-            strategy_ref=str(item.get("strategy_ref") or ""),
-            profile_ref=str(item.get("profile_ref") or ""),
-            enabled=bool(item.get("enabled", True)),
-        ).to_dict())
+        out.append(
+            Target(
+                name=str(item.get("name") or pattern),
+                match_type=match_type,
+                pattern=pattern,
+                require_foreground=bool(item.get("require_foreground", True)),
+                ime_policy=ime,
+                strategy_ref=str(item.get("strategy_ref") or ""),
+                profile_ref=str(item.get("profile_ref") or ""),
+                enabled=bool(item.get("enabled", True)),
+            ).to_dict()
+        )
     return out
 
 
-def match_target(target: dict, title: str = "", exe: str = "",
-                 class_name: str = "") -> bool:
+def match_target(target: dict, title: str = "", exe: str = "", class_name: str = "") -> bool:
     """单条规则匹配（大小写不敏感子串）。class 需要调用方提供窗口类名。"""
     if not target.get("enabled"):
         return False
@@ -78,8 +80,7 @@ def match_target(target: dict, title: str = "", exe: str = "",
     return bool(pattern) and pattern.lower() in str(hay).lower()
 
 
-def evaluate_targets(targets: list[dict], title: str = "", exe: str = "",
-                     class_name: str = "") -> dict | None:
+def evaluate_targets(targets: list[dict], title: str = "", exe: str = "", class_name: str = "") -> dict | None:
     """返回第一条命中的启用规则（纯函数）。"""
     for t in targets or []:
         if match_target(t, title, exe, class_name):
@@ -93,16 +94,18 @@ def targets_from_games(games) -> list[dict]:
     for g in games or []:
         if not isinstance(g, dict):
             continue
-        out.append({
-            "name": str(g.get("name") or g.get("pattern") or "目标"),
-            "match_type": str(g.get("match_type") or "exe"),
-            "pattern": str(g.get("pattern") or ""),
-            "require_foreground": True,
-            "ime_policy": "disable",
-            "strategy_ref": "",
-            "profile_ref": str(g.get("profile") or ""),
-            "enabled": bool(g.get("enabled", True)),
-        })
+        out.append(
+            {
+                "name": str(g.get("name") or g.get("pattern") or "目标"),
+                "match_type": str(g.get("match_type") or "exe"),
+                "pattern": str(g.get("pattern") or ""),
+                "require_foreground": True,
+                "ime_policy": "disable",
+                "strategy_ref": "",
+                "profile_ref": str(g.get("profile") or ""),
+                "enabled": bool(g.get("enabled", True)),
+            }
+        )
     return normalize_targets(out)
 
 
@@ -114,7 +117,7 @@ def resolve_target(target: dict, store: dict | None = None) -> dict:
     """
     store = store or {}
     names = {p.get("name") for p in (store.get("profiles") or [])}
-    strategies = (store.get("strategies") or {})
+    strategies = store.get("strategies") or {}
     profile = str(target.get("profile_ref") or "")
     if profile and profile not in names:
         profile = ""

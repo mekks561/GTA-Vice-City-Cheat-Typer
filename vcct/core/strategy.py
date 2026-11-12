@@ -13,6 +13,7 @@
 策略可以放在 `store["strategies"]`（具名，供 target.strategy_ref 引用），
 也可以直接写在单条秘籍的 `strategy` 字段上。任何缺省都回落到 fixed + 现有参数。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,9 +35,13 @@ class SendStrategy:
     retries: int = 0
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "interval_ms": self.interval_ms,
-                "hold_ms": self.hold_ms, "pre_delay_ms": self.pre_delay_ms,
-                "retries": self.retries}
+        return {
+            "kind": self.kind,
+            "interval_ms": self.interval_ms,
+            "hold_ms": self.hold_ms,
+            "pre_delay_ms": self.pre_delay_ms,
+            "retries": self.retries,
+        }
 
 
 def _clamp_int(value, lo: int, hi: int, default: int | None = None) -> int | None:
@@ -79,8 +84,7 @@ def normalize_strategies(raw, limit: int = 20) -> dict:
 def resolve_strategy(named: dict | None, cheat: dict | None = None) -> dict:
     """秘籍级覆盖 > 具名策略 > fixed 默认（纯函数）。"""
     base = normalize_strategy(cheat.get("strategy") if isinstance(cheat, dict) else None)
-    if base["kind"] != DEFAULT_STRATEGY or any(
-            base[k] is not None for k in ("interval_ms", "hold_ms", "pre_delay_ms")):
+    if base["kind"] != DEFAULT_STRATEGY or any(base[k] is not None for k in ("interval_ms", "hold_ms", "pre_delay_ms")):
         return base
     ref = str((cheat or {}).get("strategy_ref") or "") if isinstance(cheat, dict) else ""
     if ref and isinstance(named, dict) and ref in named:
@@ -88,8 +92,7 @@ def resolve_strategy(named: dict | None, cheat: dict | None = None) -> dict:
     return normalize_strategy(None)
 
 
-def plan_send(strategy: dict, code: str, base_interval: int, base_pre: int,
-              uppercase: bool = False, attempt: int = 0) -> SendParams:
+def plan_send(strategy: dict, code: str, base_interval: int, base_pre: int, uppercase: bool = False, attempt: int = 0) -> SendParams:
     """把策略 + 现有参数合成 `SendParams`（纯函数，不碰键盘）。
 
     `attempt > 0` 表示自适应重试：不再重复前置延迟，且间隔按次数加长。
@@ -105,7 +108,7 @@ def plan_send(strategy: dict, code: str, base_interval: int, base_pre: int,
         interval = min(300, interval + 15 * attempt)
         hold = None if hold is None else min(200, int(hold) + 5 * attempt)
     if attempt > 0:
-        pre = 0     # 重试不该再等一次"手指离开修饰键"的前置延迟
+        pre = 0  # 重试不该再等一次"手指离开修饰键"的前置延迟
     return SendParams.for_code(code, interval, pre, uppercase, hold_ms=hold)
 
 
@@ -120,9 +123,13 @@ def should_retry(strategy: dict, attempt: int, sent: int, total: int) -> bool:
 def describe_plan(strategy: dict, code: str, base_interval: int, base_pre: int) -> dict:
     """CLI 预演用：返回一次发送计划的纯数据（不执行）。"""
     p = plan_send(strategy, code, base_interval, base_pre)
-    return {"code": p.code, "kind": normalize_strategy(strategy)["kind"],
-            "interval_ms": p.interval_ms, "hold_ms": p.hold_ms,
-            "pre_delay_ms": p.pre_delay_ms,
-            "planned_seconds": round(
-                (p.pre_delay_ms + len(p.code) * p.interval_ms) / 1000.0, 3),
-            "chars": len(p.code), "retries": normalize_strategy(strategy)["retries"]}
+    return {
+        "code": p.code,
+        "kind": normalize_strategy(strategy)["kind"],
+        "interval_ms": p.interval_ms,
+        "hold_ms": p.hold_ms,
+        "pre_delay_ms": p.pre_delay_ms,
+        "planned_seconds": round((p.pre_delay_ms + len(p.code) * p.interval_ms) / 1000.0, 3),
+        "chars": len(p.code),
+        "retries": normalize_strategy(strategy)["retries"],
+    }
