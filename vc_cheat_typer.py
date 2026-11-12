@@ -1216,6 +1216,8 @@ class HotkeyOverview(tk.Toplevel):
         btns = ttk.Frame(self)  # ttk 不接受 bg=，颜色由 style 统一继承
         btns.pack(fill="x", padx=12, pady=(2, 10))
         ttk.Button(btns, text="↻ 重新检测占用", command=self._redetect).pack(side="left")
+        ttk.Button(btns, text="🔧 修复选中", command=self._fix_selected).pack(side="left", padx=(8, 0))
+        ttk.Button(btns, text="⚡ 自动修复全部冲突", command=self._auto_fix_all).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="导出为文本…", command=self._export).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right")
 
@@ -1284,6 +1286,93 @@ class HotkeyOverview(tk.Toplevel):
     def _redetect(self):
         self.app.apply_hotkeys()
         self.app.log("正在重新检测快捷键占用…", "info")
+
+    def _resolve_cheat(self, iid: str) -> tuple[dict, dict] | None:
+        """iid = "方案名:cheat_id" → (profile, cheat)；找不到返回 None。"""
+        if iid == "__pause__" or ":" not in iid:
+            return None
+        prof_name, cid = iid.split(":", 1)
+        for prof in self.app.store["profiles"]:
+            if prof.get("name") != prof_name:
+                continue
+            for c in prof.get("cheats", []):
+                if c.get("id") == cid:
+                    return prof, c
+        return None
+
+    def _fix_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("未选择", "请在列表里选一条冲突的秘籍再修复。", parent=self)
+            return
+        if sel[0] == "__pause__":
+            messagebox.showinfo("提示", "全局暂停键请到「设置」里修改。", parent=self)
+            return
+        resolved = self._resolve_cheat(sel[0])
+        if not resolved:
+            return
+        _prof, cheat = resolved
+        if cheat["id"] not in self.app.conflicts:
+            messagebox.showinfo("无需修复", "这条目前生效，不冲突。", parent=self)
+            return
+
+        def _on_new_combo(combo: str):
+            if not combo:
+                return
+            cheat["hotkey"] = combo
+            self.app.persist()
+            self.app.apply_hotkeys()
+            self.app.log(f"已把「{cheat['name']}」的热键改到 {combo}", "ok")
+
+        HotkeyCapture(self, cheat.get("hotkey", ""), _on_new_combo)
+
+    def _auto_fix_all(self):
+        """让 pick_free_combo 按候选序列批量替换所有冲突项的热键。
+
+        策略：遍历当前方案 cheat，凡是有冲突的就找空闲键；找得到就改，
+        找不到就跳过（键位池耗尽时宁可留冲突也不覆盖正在生效的条目）。
+        """
+        active = next((p for p in self.app.store["profiles"] if p["name"] == self.app.active_profile), None)
+        if not active:
+            return
+        cheats = active["cheats"]
+        conflict_ids = [cid for cid in self.app.conflicts if cid != PAUSE_ID]
+        if not conflict_ids:
+            messagebox.showinfo("无需修复", "当前方案没有冲突的秘籍热键。", parent=self)
+            return
+
+        pause_combo = self.app.settings.get("pause_hotkey", "")
+        # avoid：冲突项当前 hotkey 都放进 avoid，防止 candidate 序列把相同键再分配回来
+        conflict_hotkeys = {c.get("hotkey", "") for c in cheats if c.get("id") in conflict_ids}
+
+        changed, skipped = 0, 0
+        for cheat in cheats:
+            if cheat.get("id") not in conflict_ids:
+                continue
+            new_combo = pick_free_combo(cheats, pause_combo, avoid=list(conflict_hotkeys), exclude_id=cheat["id"])
+            if new_combo:
+                cheat["hotkey"] = new_combo
+                changed += 1
+                conflict_hotkeys.discard(new_combo)  # 后面的条目还能再用这个
+            else:
+                skipped += 1
+
+        if changed == 0:
+            messagebox.showwarning(
+                "键位池耗尽",
+                "候选空闲键（F1–F11 / Shift / Ctrl / Ctrl+Shift / Alt）都被占用，无法自动修复。建议手动改，或先腾出几个常用键。",
+                parent=self,
+            )
+            return
+
+        self.app.persist()
+        self.app.apply_hotkeys()
+        self.app.log(f"自动修复：{changed} 条热键已换，{skipped} 条因键位池耗尽跳过。", "ok")
+        messagebox.showinfo(
+            "自动修复完成",
+            f"已为 {changed} 条冲突秘籍分配新的空闲键。" + (f"\n{skipped} 条因候选键位耗尽未改动。" if skipped else ""),
+            parent=self,
+        )
 
     def _export(self):
         path = filedialog.asksaveasfilename(
