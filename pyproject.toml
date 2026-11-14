@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vc-cheat-typer"
-version = "2.2.0"
+version = "2.2.1"
 description = "VC-Cheat-Typer - Windows keyboard-input tool with a reusable zero-GUI core"
 readme = "README.en.md"
 requires-python = ">=3.8"

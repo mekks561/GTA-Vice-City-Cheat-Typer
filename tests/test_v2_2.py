@@ -353,7 +353,7 @@ class TestCompatibility(unittest.TestCase):
         self.assertEqual(keys, expected)
 
     def test_version_aligned(self):
-        self.assertEqual(APP_VER, "2.2.0")
+        self.assertEqual(APP_VER, "2.2.1")
         with open(os.path.join(ROOT, "pyproject.toml"), "r", encoding="utf-8") as fh:
             self.assertIn(f'version = "{APP_VER}"', fh.read())
 

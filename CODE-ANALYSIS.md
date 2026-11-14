@@ -13,7 +13,7 @@
 | 产品形态 | Windows 桌面 GUI（Tkinter）+ 命令行（`vcct`）+ PyInstaller 单文件/单目录产物 |
 | 核心能力 | 全局热键触发 → 向游戏窗口注入键盘字符序列（秘籍代码），带前台校验、IME 规避、权限拦截识别 |
 | 技术栈 | Python ≥ 3.8；运行时零依赖（仅标准库 + `ctypes` 调 user32/kernel32/imm32） |
-| 版本 | `2.2.0`（`vcct/const.py`），配置 schema `STORE_VERSION = 3` |
+| 版本 | `2.2.1`（`vcct/const.py`），配置 schema `STORE_VERSION = 3` |
 | 入口 | `vc_cheat_typer.py:main()`（GUI / 自检 / 诊断 / `--cli` 转发）；`vcct/cli.py:main()`（控制台脚本 `vcct`） |
 | 代码规模 | 单体 3,946 行；包 3,690 行；测试 228 个用例 |
 | 质量闸门 | `.github/workflows/ci.yml`：ruff（仅主文件）+ `py_compile` + `unittest discover`，Windows × Python 3.10/3.12 |
